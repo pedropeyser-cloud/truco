@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14171c">
+<meta name="description" content="Truco argentino para jugar con un amigo desde el celular. Mandás un link y empiezan.">
+<meta property="og:title" content="Truco · el barajador reparte">
+<meta property="og:description" content="Te invitaron a un truco. Tocá el link y entrá a la mesa.">
+<title>Truco</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-50 -50 100 100'%3E%3Crect x='-50' y='-50' width='100' height='100' rx='18' fill='%231e222a'/%3E%3Ccircle r='14' stroke='%23f0a93b' stroke-width='5' fill='none'/%3E%3Ccircle r='3' fill='%23f0a93b'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/estilo.css">
+<script src="js/vendor/peerjs.min.js" defer></script>
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<div class="grano" aria-hidden="true"></div>
+
+<section id="inicio" class="pantalla inicio">
+  <div class="inicio-cartas" aria-hidden="true"><div class="ic ic1"></div><div class="ic ic2"></div></div>
+  <h1>truco</h1>
+  <p class="mano-sub">el barajador reparte</p>
+
+  <div id="bloque-crear" class="bloque">
+    <label class="campo"><span>Tu nombre</span><input id="in-nombre" type="text" maxlength="16" autocomplete="nickname" placeholder="Cómo te ven en la mesa"></label>
+    <div class="campo"><span>Partida</span>
+      <div class="segmentado" role="group" aria-label="Puntos de la partida">
+        <button type="button" data-meta="15" aria-pressed="true">a 15</button>
+        <button type="button" data-meta="30" aria-pressed="false">a 30 <small>malas y buenas</small></button>
+      </div>
+    </div>
+    <div class="campo"><span>Flor</span>
+      <div class="segmentado" role="group" aria-label="Jugar con flor">
+        <button type="button" data-flor="0" aria-pressed="true">sin flor</button>
+        <button type="button" data-flor="1" aria-pressed="false">con flor</button>
+      </div>
+    </div>
+    <button id="btn-crear" class="b fuerte ancho">Invitar a alguien</button>
+    <button id="btn-practica" class="b ancho">Practicar contra la máquina</button>
+  </div>
+
+  <div id="bloque-espera" class="bloque" hidden>
+    <p class="guia">Mandale este link. Cuando lo abra, se reparte.</p>
+    <div class="link-caja"><code id="txt-link"></code></div>
+    <div class="fila">
+      <button id="btn-compartir" class="b fuerte">Compartir</button>
+      <button id="btn-copiar" class="b">Copiar link</button>
+    </div>
+    <p id="txt-espera" class="espera">Abriendo la mesa…</p>
+    <p class="aviso-chico">No cierres esta pestaña: la partida vive en tu navegador.</p>
+  </div>
+
+  <div id="bloque-invitado" class="bloque" hidden>
+    <p class="guia">Te invitaron a un truco.</p>
+    <label class="campo"><span>Tu nombre</span><input id="in-nombre-inv" type="text" maxlength="16" autocomplete="nickname" placeholder="Cómo te ven en la mesa"></label>
+    <button id="btn-entrar" class="b fuerte ancho">Sentarme a la mesa</button>
+    <p id="txt-invitado" class="espera"></p>
+  </div>
+</section>
+
+<section id="juego" class="pantalla juego" hidden>
+  <header class="barra">
+    <div class="rival">
+      <span class="punto-red" id="punto-red" title="conexión"></span>
+      <span id="nombre-rival" class="nombre"></span>
+      <span id="chip-rival" class="chip" hidden>mano</span>
+    </div>
+    <button id="btn-tanteador" class="tanteador-mini" aria-label="Ver el tanteador"></button>
+    <button id="btn-menu" class="b-icono" aria-label="Menú">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>
+    </button>
+  </header>
+  <div id="mesa" class="mesa"></div>
+  <div id="nota" class="nota" aria-live="polite"></div>
+  <p id="estado" class="estado" aria-live="polite"></p>
+  <div id="bocadillos" aria-live="assertive"></div>
+  <aside id="servilleta-fija" class="servilleta fija" aria-label="Tanteador"></aside>
+  <nav id="acciones" class="acciones" aria-label="Jugadas"></nav>
+</section>
+
+<div id="capa" class="capa" hidden></div>
+<div id="aviso" class="aviso" role="status" hidden></div>
+</body>
+</html>
