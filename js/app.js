@@ -5,6 +5,7 @@ import * as Bot from "./bot.js";
 import { frente, dorso, nombreCarta, idValido } from "./cartas.js";
 import * as S from "./sonido.js";
 import { abrirSala, entrarSala, codigoNuevo, linkDe } from "./red.js";
+import * as Mesa from "./mesa.js"; // mesas de 4 y 6 (2 contra 2, 3 contra 3)
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -38,6 +39,10 @@ function iniciar() {
   for (const g of document.querySelectorAll(".segmentado")) g.addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
     for (const x of g.querySelectorAll("button")) x.setAttribute("aria-pressed", x === b);
+    const enEquipo = jugadoresElegidos() > 2;
+    $("#campo-punta").hidden = !enEquipo;
+    $("#btn-crear").textContent = enEquipo ? "Armar la mesa" : "Invitar a alguien";
+    $("#btn-practica").textContent = enEquipo ? "Practicar con bots" : "Practicar contra la máquina";
   });
   // en el celular el toque "vale" al levantar el dedo (pointerup/touchend/click), no al apoyarlo
   for (const ev of ["pointerdown", "pointerup", "touchend", "click", "keydown"])
@@ -45,7 +50,8 @@ function iniciar() {
   S.cargarFrases();
 
   const sala = params.get("sala");
-  if (sala) {
+  if (params.get("mesa")) Mesa.desdeLink(params);
+  else if (sala) {
     const g = leerGuardado();
     if (params.get("host") && g?.codigo === sala) return reanudarAnfitrion(g);
     $("#bloque-crear").hidden = true; $("#bloque-invitado").hidden = false;
@@ -59,13 +65,17 @@ function iniciar() {
 }
 function leerForm() {
   const nombre = ($("#in-nombre").value.trim() || "Yo").slice(0, 16); guardarNombre(nombre);
-  return { nombre, meta: +document.querySelector("[data-meta][aria-pressed=true]").dataset.meta, flor: document.querySelector("[data-flor][aria-pressed=true]").dataset.flor === "1" };
+  return { nombre, meta: +document.querySelector("[data-meta][aria-pressed=true]").dataset.meta, flor: document.querySelector("[data-flor][aria-pressed=true]").dataset.flor === "1",
+    jugadores: jugadoresElegidos(), puntaYHacha: jugadoresElegidos() > 2 && document.querySelector("[data-punta][aria-pressed=true]")?.dataset.punta === "1" };
 }
+function jugadoresElegidos() { return +(document.querySelector("[data-jug][aria-pressed=true]")?.dataset.jug || 2); }
 
 // ================= ANFITRIÓN =================
 function crearSala() {
   if (!window.Peer) return aviso("No cargó la conexión. Revisá internet y recargá.");
-  config = leerForm(); codigo = codigoNuevo(); estado = null; modo = "anfitrion";
+  config = leerForm();
+  if (config.jugadores > 2) return Mesa.crearMesa(config);
+  codigo = codigoNuevo(); estado = null; modo = "anfitrion";
   history.replaceState(null, "", `?sala=${codigo}&host=1`);
   guardar(); mostrarEspera(); conectarAnfitrion();
 }
@@ -154,7 +164,9 @@ function entrarComoInvitado(sala) {
 
 // ================= PRÁCTICA =================
 function empezarPractica() {
-  config = leerForm(); modo = "practica";
+  config = leerForm();
+  if (config.jugadores > 2) return Mesa.practicarMesa(config);
+  modo = "practica";
   estado = M.nuevaPartida({ meta: config.meta, flor: config.flor, nombres: [config.nombre, "El Barajador"] });
   const r = M.repartir(estado); estado = r.estado; abrirJuego(); difundir(r.eventos);
 }

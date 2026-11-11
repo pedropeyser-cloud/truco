@@ -1,0 +1,841 @@
+// Mesa de 4 y de 6 (2 contra 2 y 3 contra 3): sala de espera, caras con señas, bots y punta y hacha.
+// El anfitrión tiene la partida (equipos.js) y manda a cada invitado solo su vista. Los gestos (señas, cabeza,
+// preguntas del pie) no pasan por el motor: el anfitrión los reparte a todos, rivales incluidos.
+import * as E from "./equipos.js";
+import * as BotE from "./bot-equipos.js";
+import { tantoDe, jerarquia, esFlor } from "./motor.js";
+import { frente, dorso, nombreCarta, idValido } from "./cartas.js";
+import * as S from "./sonido.js";
+import { abrirSalaGrupo, entrarSala, codigoNuevo, linkMesa } from "./red.js";
+import * as K from "./caras.js";
+
+const $ = (s) => document.querySelector(s);
+const RATIO = 860 / 600;
+const CANTO = { envido: "envido", real_envido: "real envido", falta_envido: "falta envido", truco: "truco", retruco: "retruco", vale_cuatro: "vale cuatro", flor: "flor", contraflor: "contraflor", contraflor_al_resto: "contraflor al resto" };
+const BOTON_CANTO = { envido: "Envido", real_envido: "Real envido", falta_envido: "Falta envido", truco: "Truco", retruco: "Quiero retruco", vale_cuatro: "Vale cuatro", flor: "Flor", contraflor: "Contraflor", contraflor_al_resto: "Contraflor al resto" };
+const DICHO = { envido: "¡Envido!", envido_envido: "¡Envido, envido!", real_envido: "¡Real envido!", falta_envido: "¡Falta envido!", truco: "¡Truco!", retruco: "¡Quiero retruco!", vale_cuatro: "¡Vale cuatro!", flor: "¡Flor!", contraflor: "¡Contraflor!", contraflor_al_resto: "¡Contraflor al resto!",
+  quiero: "¡Quiero!", no_quiero: "No quiero", con_flor_me_achico: "Con flor me achico", son_buenas: "Son buenas", son_mejores: "¡Son mejores!", en_mesa: "Las quiero en mesa", mazo: "Me voy al mazo", envido_primero: "¡El envido está primero!", gane: "¡Ganamos!", perdi: "Otra vez será" };
+const ENVIDOS = ["envido", "real_envido", "falta_envido"], TRUCOS = ["truco", "retruco", "vale_cuatro"];
+const NOMBRES_BOT = ["El Barajador", "La Tía", "El Tano", "La Abuela", "El Pibe"];
+const GLIFO = { mas: "↑", menos: "↓", si: "sí", no: "no" };
+
+let modo = null, estado = null, red = null, codigo = null;
+let config = { jugadores: 4, meta: 15, flor: false, puntaYHacha: false, nombre: "" };
+let asientos = [];              // anfitrión: [{ tipo: "yo"|"persona"|"bot", nombre, id, conectado }]
+let vista = null, elegida = null, confirmaMazo = false, capaCerradaMano = null, bandeja = null;
+let senasMano = [], ultimaPregunta = null, numeroManoSenas = -1, ultimoReparto = 0;
+const botTimers = new Map();
+const cartasEl = new Map();
+let carasEl = [];               // por asiento: { el, svg, parar }
+
+// ---------------- guardado ----------------
+const guardar = () => { if (modo !== "anfitrion") return; try { localStorage.setItem("truco-mesa", JSON.stringify({ codigo, config, asientos, estado })); } catch {} };
+const leerGuardado = () => { try { return JSON.parse(localStorage.getItem("truco-mesa")); } catch { return null; } };
+function miId() {
+  try { let id = localStorage.getItem("truco-id"); if (!id) { id = Math.random().toString(36).slice(2, 12); localStorage.setItem("truco-id", id); } return id; }
+  catch { return Math.random().toString(36).slice(2, 12); }
+}
+function aviso(txt, ms = 3200) {
+  const a = $("#aviso"); a.textContent = txt; a.hidden = false;
+  clearTimeout(aviso.t); aviso.t = setTimeout(() => (a.hidden = true), ms);
+}
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ================= ENTRADAS (las llama app.js) =================
+export function crearMesa(cfg) {
+  if (!window.Peer) return aviso("No cargó la conexión. Revisá internet y recargá.");
+  config = { ...cfg }; codigo = codigoNuevo(); modo = "anfitrion"; estado = null;
+  asientos = Array.from({ length: config.jugadores }, (_, i) => (i === 0 ? { tipo: "yo", nombre: config.nombre } : null));
+  history.replaceState(null, "", `?mesa=${codigo}&host=1`);
+  guardar(); mostrarLobby(); conectarAnfitrion();
+}
+
+export function practicarMesa(cfg) {
+  config = { ...cfg }; modo = "practica";
+  asientos = Array.from({ length: config.jugadores }, (_, i) => (i === 0 ? { tipo: "yo", nombre: config.nombre } : { tipo: "bot", nombre: NOMBRES_BOT[i - 1] }));
+  empezarPartida();
+}
+
+/** Link ?mesa=: el anfitrión que recargó retoma; los demás entran como invitados. Devuelve true si se encargó. */
+export function desdeLink(params) {
+  const sala = params.get("mesa");
+  if (!sala) return false;
+  const g = leerGuardado();
+  if (params.get("host") && g?.codigo === sala) { reanudarAnfitrion(g); return true; }
+  $("#bloque-crear").hidden = true; $("#bloque-invitado").hidden = false;
+  $("#bloque-invitado .guia").textContent = "Te invitaron a una mesa de truco en equipo.";
+  $("#btn-entrar").onclick = () => entrarComoInvitado(sala);
+  return true;
+}
+
+// ================= ANFITRIÓN =================
+function reanudarAnfitrion(g) {
+  config = g.config; codigo = g.codigo; estado = g.estado; asientos = g.asientos; modo = "anfitrion";
+  asientos.forEach((a) => { if (a?.tipo === "persona") a.conectado = false; });
+  const esperarPeer = () => (window.Peer ? conectarAnfitrion() : setTimeout(esperarPeer, 100));
+  if (estado) { abrirJuego(); difundir([]); aviso("Partida recuperada. Los demás vuelven abriendo el link."); }
+  else mostrarLobby();
+  esperarPeer();
+}
+
+function conectarAnfitrion() {
+  red = abrirSalaGrupo(codigo, config.jugadores - 1, {
+    alAbrir: () => { const t = $("#txt-lobby"); if (t) t.textContent = "Mesa abierta. Mandá el link."; puntoRed(true); },
+    alEntrar: (id, m) => entra(id, String(m.nombre || "Invitado").slice(0, 16)),
+    alSalir: (id) => {
+      const j = asientos.findIndex((a) => a?.id === id);
+      if (j < 0) return;
+      asientos[j].conectado = false;
+      if (!estado) { asientos[j] = null; renderLobby(); avisarLobby(); }
+      else aviso(`${asientos[j].nombre} se desconectó. Puede volver con el link, o lo reemplaza un bot desde el menú.`, 5000);
+      guardar();
+    },
+    alError: (e) => { if (e.type !== "peer-unavailable") aviso("Problema de conexión: " + (e.type || e.message)); },
+    alMensaje: (id, m) => {
+      const j = asientos.findIndex((a) => a?.id === id);
+      if (j < 0) return;
+      if (m.t === "accion") hostAplicar(j, m.accion);
+      else if (m.t === "gesto") registrarGesto(j, m.tipo, m.k);
+      else if (m.t === "revancha" && estado?.fase === "fin_partida") nuevaPartidaMismaMesa();
+    },
+  });
+}
+
+function entra(id, nombre) {
+  let j = asientos.findIndex((a) => a?.id === id);
+  if (j < 0 && !estado) j = asientos.findIndex((a) => a === null);
+  if (j < 0 && estado) j = asientos.findIndex((a) => a.tipo === "bot"); // con la partida empezada, toma el lugar de un bot
+  if (j < 0) { red.echar(id); return; }
+  const volvio = asientos[j]?.id === id;
+  asientos[j] = { tipo: "persona", nombre, id, conectado: true };
+  if (estado) {
+    estado.nombres[j] = nombre;
+    clearTimeout(botTimers.get(j)); botTimers.delete(j);
+    guardar();
+    aviso(volvio ? `${nombre} volvió` : `${nombre} se sentó a la mesa`);
+    difundir([]);
+  } else {
+    guardar(); renderLobby(); avisarLobby();
+    aviso(`${nombre} se sentó a la mesa`);
+  }
+}
+
+function avisarLobby() {
+  if (modo !== "anfitrion" || !red) return;
+  const lista = asientos.map((a) => (a ? { nombre: a.nombre, tipo: a.tipo === "yo" ? "persona" : a.tipo } : null));
+  asientos.forEach((a, j) => { if (a?.tipo === "persona") red.enviar(a.id, { t: "lobby", yo: j, asientos: lista, config: { ...config, nombre: "" } }); });
+}
+
+function empezarPartida() {
+  asientos = asientos.map((a, i) => a || { tipo: "bot", nombre: NOMBRES_BOT[(i - 1 + NOMBRES_BOT.length) % NOMBRES_BOT.length] });
+  estado = E.nuevaPartida({ jugadores: config.jugadores, meta: config.meta, flor: config.flor, puntaYHacha: config.puntaYHacha, nombres: asientos.map((a) => a.nombre) });
+  const r = E.repartir(estado); estado = r.estado;
+  guardar(); abrirJuego(); difundir(r.eventos);
+}
+
+function nuevaPartidaMismaMesa() {
+  if (modo === "invitado") return;
+  estado = E.nuevaPartida({ jugadores: config.jugadores, meta: config.meta, flor: config.flor, puntaYHacha: config.puntaYHacha, nombres: asientos.map((a) => a.nombre) });
+  const r = E.repartir(estado); estado = r.estado; guardar(); cerrarCapa(); difundir(r.eventos);
+}
+
+function hostAplicar(j, accion) {
+  let r;
+  try { r = E.aplicar(estado, j, accion); }
+  catch (e) {
+    console.warn("acción rechazada", j, accion, e.message);
+    if (asientos[j]?.tipo === "persona") red?.enviar(asientos[j].id, { t: "vista", vista: E.vista(estado, j), eventos: [] });
+    return;
+  }
+  estado = r.estado; guardar(); difundir(r.eventos);
+}
+
+function difundir(eventos) {
+  if (eventos.some((e) => e.t === "reparto")) { ultimoReparto = Date.now(); senasMano = Array.from({ length: estado.n }, () => []); ultimaPregunta = null; }
+  asientos.forEach((a, j) => {
+    if (a.tipo === "yo") recibir(E.vista(estado, j), eventos);
+    else if (a.tipo === "persona" && red) red.enviar(a.id, { t: "vista", vista: E.vista(estado, j), eventos });
+  });
+  if (eventos.some((e) => e.t === "reparto")) planificarSenasBots();
+  programarBots();
+}
+
+// ---------------- bots ----------------
+function programarBots() {
+  if (modo === "invitado" || !estado) return;
+  asientos.forEach((a, j) => {
+    if (a.tipo !== "bot" || botTimers.has(j)) return;
+    const acc = E.acciones(estado, j);
+    if (!acc.length || acc.every((x) => x.t === "en_mesa")) return;
+    const finMano = estado.fase !== "jugando";
+    const pausa = (finMano ? 1800 + Math.random() * 900 : 1000 + Math.random() * 1100) + Math.max(0, 3000 - (Date.now() - ultimoReparto));
+    botTimers.set(j, setTimeout(() => {
+      botTimers.delete(j);
+      if (asientos[j]?.tipo !== "bot" || !E.acciones(estado, j).length) return programarBots();
+      try { hostAplicar(j, BotE.elegir(E.vista(estado, j), { senas: senasPara(j) })); } catch (e) { console.error(e); }
+      programarBots();
+    }, pausa));
+  });
+}
+
+/** Lo que el bot sabe de sus compañeros: las señas de cartas y las respuestas con la cabeza. */
+function senasPara(j) {
+  const cartas = [], equipo = E.equipoDe(j);
+  let tanto = 0;
+  senasMano.forEach((lista, x) => {
+    if (x === j || E.equipoDe(x) !== equipo) return;
+    for (const g of lista) {
+      if (g.tipo === "sena" && g.k !== "nada" && g.k !== "flor") cartas.push(g.k);
+      if (g.tipo === "cabeza" && g.a === "p_envido" && g.k === "si") tanto = Math.max(tanto, 28);
+      if (g.tipo === "cabeza" && g.a === "p_mas27" && g.k === "mas") tanto = Math.max(tanto, 30);
+    }
+  });
+  return { cartas, tanto };
+}
+
+function planificarSenasBots() {
+  if (estado.tipoMano !== "redonda") return;
+  const mano = estado.numeroMano;
+  asientos.forEach((a, j) => {
+    if (a.tipo !== "bot") return;
+    const cartas = estado.manos[j];
+    const lista = [];
+    if (estado.flor && esFlor(cartas)) lista.push("flor");
+    cartas.map((c) => ({ c, f: jerarquia(c), k: K.senaDeCarta(c) })).filter((x) => x.k && x.f >= 9)
+      .sort((a, b) => b.f - a.f).slice(0, 2).forEach((x) => lista.push(x.k));
+    if (!lista.length && Math.random() < 0.6) lista.push("nada");
+    lista.forEach((k, i) => setTimeout(() => {
+      if (!estado || estado.numeroMano !== mano || estado.fase !== "jugando" || estado.alMazo[j] || asientos[j]?.tipo !== "bot") return;
+      registrarGesto(j, "sena", k);
+    }, 1800 + i * 1700 + Math.random() * 2600));
+  });
+}
+
+function respuestaBot(j, k) {
+  const mano = estado.manos[j], quedan = estado.enMano[j], tanto = tantoDe(mano);
+  const fuerza = quedan.reduce((t, c) => t + Math.max(0, jerarquia(c) - 5), 0);
+  switch (k) {
+    case "p_envido": return tanto >= 27 ? "si" : "no";
+    case "p_mas27": return tanto > 27 ? "mas" : "menos";
+    case "p_truco": return quedan.some((c) => jerarquia(c) >= 10) ? "si" : "no";
+    case "p_canto": return fuerza >= 11 ? "si" : "no";
+    case "p_mazo": return fuerza < 5 ? "si" : "no";
+    case "p_flor": return esFlor(mano) ? "si" : "no";
+    default: return "no";
+  }
+}
+
+// ---------------- gestos ----------------
+function registrarGesto(j, tipo, k) {
+  if (!estado || estado.fase !== "jugando" || estado.tipoMano !== "redonda" || estado.alMazo[j]) return;
+  const valido = (tipo === "sena" && K.senaDe(k)) || (tipo === "cabeza" && K.cabezaDe(k)) || (tipo === "pregunta" && K.preguntaDe(k) && E.pieDe(estado, E.equipoDe(j)) === j);
+  if (!valido) return;
+  const g = { tipo, k, a: tipo === "cabeza" && ultimaPregunta && E.equipoDe(ultimaPregunta.de) === E.equipoDe(j) ? ultimaPregunta.k : null };
+  senasMano[j]?.push(g);
+  red?.enviarTodos({ t: "gesto", jugador: j, tipo, k });
+  if (asientos[j].tipo !== "yo") mostrarGesto(j, tipo, k);
+  if (tipo === "pregunta") {
+    ultimaPregunta = { de: j, k };
+    const mano = estado.numeroMano;
+    asientos.forEach((a, b) => {
+      if (a.tipo !== "bot" || b === j || E.equipoDe(b) !== E.equipoDe(j) || estado.alMazo[b]) return;
+      setTimeout(() => { if (estado.numeroMano === mano) registrarGesto(b, "cabeza", respuestaBot(b, k)); }, 900 + Math.random() * 900);
+    });
+  }
+}
+
+function hacerGesto(tipo, k) {
+  S.desbloquear();
+  mostrarGesto(vista.yo, tipo, k);
+  if (modo === "invitado") red.enviar({ t: "gesto", tipo, k });
+  else registrarGesto(vista.yo, tipo, k);
+}
+
+function mostrarGesto(j, tipo, k) {
+  const c = carasEl[j];
+  if (!c) return;
+  if (tipo === "sena") K.senar(c.svg, k);
+  else if (tipo === "cabeza") { K.cabecear(c.svg, k); glifo(j, GLIFO[k]); }
+  else if (tipo === "pregunta") { const p = K.preguntaDe(k); if (p) bocadillo(j, p.texto, true); S.decir(k); }
+}
+
+function glifo(j, txt) {
+  const c = carasEl[j]; if (!c) return;
+  const g = document.createElement("span"); g.className = "glifo"; g.textContent = txt;
+  c.el.appendChild(g); setTimeout(() => g.remove(), 1000);
+}
+
+// ================= INVITADO =================
+function entrarComoInvitado(sala) {
+  if (!window.Peer) return aviso("No cargó la conexión. Revisá internet y recargá.");
+  const nombre = ($("#in-nombre-inv").value.trim() || "Invitado").slice(0, 16);
+  try { localStorage.setItem("truco-nombre", nombre); } catch {}
+  modo = "invitado"; codigo = sala;
+  $("#btn-entrar").disabled = true; $("#txt-invitado").textContent = "Buscando la mesa…";
+  red = entrarSala(sala, {
+    alConectar: () => { red.enviar({ t: "hola", nombre, id: miId() }); $("#txt-invitado").textContent = "Sentándote…"; puntoRed(true); },
+    alMensaje: (m) => {
+      if (!m || typeof m !== "object") return;
+      if (m.t === "lobby") lobbyInvitado(m);
+      else if (m.t === "vista") { abrirJuego(); recibir(m.vista, Array.isArray(m.eventos) ? m.eventos : []); }
+      else if (m.t === "gesto" && vista && m.jugador !== vista.yo) mostrarGesto(+m.jugador, String(m.tipo), String(m.k));
+      else if (m.t === "lleno") { $("#txt-invitado").textContent = "La mesa ya está completa."; red.cerrar(); }
+    },
+    alCortar: () => { puntoRed(false); aviso("Se cortó la conexión. Reconectando…"); },
+    alError: (e) => { if (e.type === "peer-unavailable") { const t = "No encuentro la mesa. ¿El que te invitó tiene la pestaña abierta? Reintento solo."; if ($("#mesa-eq").hidden) $("#txt-invitado").textContent = t; else aviso(t); } },
+  });
+}
+
+function lobbyInvitado(m) {
+  $("#bloque-invitado").hidden = true; $("#bloque-lobby").hidden = false;
+  $("#lobby-link").hidden = true; $("#btn-repartir").hidden = true;
+  $("#txt-lobby").textContent = "Esperando que reparta el que te invitó…";
+  pintarAsientosLobby(m.asientos || [], +m.yo, m.config || {});
+}
+
+// ================= SALA DE ESPERA =================
+function mostrarLobby() {
+  $("#bloque-crear").hidden = true; $("#bloque-invitado").hidden = true; $("#bloque-espera").hidden = true; $("#bloque-lobby").hidden = false;
+  $("#lobby-link").hidden = false;
+  $("#txt-link-mesa").textContent = linkMesa(codigo);
+  $("#btn-copiar-mesa").onclick = copiarLink;
+  $("#btn-compartir-mesa").hidden = !navigator.share;
+  $("#btn-compartir-mesa").onclick = () => navigator.share({ title: "Truco", text: `${config.nombre || "Te"} te invita a un truco de a ${config.jugadores}`, url: linkMesa(codigo) }).catch(() => {});
+  $("#btn-repartir").hidden = false;
+  $("#btn-repartir").onclick = () => { $("#bloque-lobby").hidden = true; empezarPartida(); };
+  renderLobby();
+}
+
+let cambio = null; // anfitrión: asiento elegido para cambiar de lugar
+function renderLobby() {
+  pintarAsientosLobby(asientos.map((a) => (a ? { nombre: a.nombre, tipo: a.tipo === "yo" ? "persona" : a.tipo } : null)), 0, config, true);
+  const libres = asientos.filter((a) => !a).length;
+  $("#btn-repartir").textContent = libres ? `Repartir (${libres === 1 ? "un bot completa" : `${libres} bots completan`} la mesa)` : "Repartir";
+}
+
+function pintarAsientosLobby(lista, yo, cfg, editable = false) {
+  const ul = $("#lobby-asientos");
+  ul.innerHTML = lista.map((a, j) => `<li data-j="${j}" class="${E.equipoDe(j) === E.equipoDe(yo) ? "nos" : "ellos"}${cambio === j ? " elegido" : ""}">
+      <span class="lugar-n">${j + 1}</span><i></i><span class="quien">${a ? esc(a.nombre) + (j === yo ? " (vos)" : "") : "libre"}</span>
+      <span class="tipo">${a ? (a.tipo === "bot" ? "bot" : "") : "si no llega nadie, un bot"}</span></li>`).join("");
+  $("#lobby-sala").textContent = `mesa de ${lista.length} · a ${cfg.meta || 15}${cfg.flor ? " · con flor" : ""}${cfg.puntaYHacha ? " · punta y hacha" : ""}`;
+  $("#lobby-ayuda").hidden = !editable;
+  if (!editable) return;
+  ul.onclick = (e) => {
+    const li = e.target.closest("li"); if (!li) return;
+    const j = +li.dataset.j;
+    if (cambio === null) { cambio = j; }
+    else { if (cambio !== j) { [asientos[cambio], asientos[j]] = [asientos[j], asientos[cambio]]; guardar(); avisarLobby(); } cambio = null; }
+    renderLobby();
+  };
+}
+
+async function copiarLink() {
+  const url = linkMesa(codigo);
+  try { await navigator.clipboard.writeText(url); aviso("Link copiado"); } catch { aviso(url, 6000); }
+}
+function puntoRed(ok) { const p = $("#eq-red"); if (p) { p.classList.toggle("si", ok); p.classList.toggle("no", !ok); } }
+
+// ================= JUEGO =================
+function abrirJuego() {
+  if (!$("#mesa-eq").hidden) return;
+  $("#inicio").hidden = true; $("#mesa-eq").hidden = false;
+  $("#eq-tanteador").onclick = () => abrirCapa(hojaTanteador());
+  $("#eq-menu").onclick = () => abrirCapa(hojaMenu());
+  $("#eq-mesa").addEventListener("click", (e) => { if (!e.target.closest(".carta") && elegida) { elegida = null; render([], false); } });
+  addEventListener("resize", () => vista && render([], true));
+}
+
+function enviarAccion(accion) {
+  elegida = null; confirmaMazo = false;
+  if (modo === "invitado") red.enviar({ t: "accion", accion });
+  else hostAplicar(vista.yo, accion);
+}
+
+const nombreDe = (j) => (j === vista.yo ? "vos" : vista.nombres[j]);
+const deNos = (eq) => eq === vista.equipo;
+const nombreEquipo = (eq) => (deNos(eq) ? "nosotros" : "ellos");
+
+let cola = Promise.resolve();
+function recibir(v, eventos) { cola = cola.then(() => procesar(v, eventos)).catch((e) => console.error(e)); }
+
+function sanear(v) {
+  const n = (x) => (Number.isFinite(+x) ? Math.trunc(+x) : 0), carta = (x) => (idValido(x) ? x : null);
+  v.n = v.n === 6 ? 6 : 4; v.yo = Math.min(v.n - 1, Math.max(0, n(v.yo))); v.equipo = v.yo % 2;
+  v.meta = v.meta === 30 ? 30 : 15; v.mano = Math.min(v.n - 1, Math.max(0, n(v.mano)));
+  v.puntos = [n(v.puntos?.[0]), n(v.puntos?.[1])];
+  v.nombres = Array.from({ length: v.n }, (_, j) => String(v.nombres?.[j] ?? "").slice(0, 16));
+  v.miMano = (v.miMano || []).map(carta).filter(Boolean).slice(0, 3);
+  v.cartasEnMano = Array.from({ length: v.n }, (_, j) => Math.min(3, Math.max(0, n(v.cartasEnMano?.[j]))));
+  v.alMazo = Array.from({ length: v.n }, (_, j) => !!v.alMazo?.[j]);
+  v.listos = Array.from({ length: v.n }, (_, j) => !!v.listos?.[j]);
+  if (v.bazas) v.bazas = v.bazas.slice(0, 3).map((b) => ({ cartas: Array.from({ length: v.n }, (_, j) => carta(b.cartas?.[j])), gana: [0, 1, "parda"].includes(b.gana) ? b.gana : null }));
+  if (v.duelos) v.duelos = v.duelos.slice(0, 3).map((d) => ({ ...d, jugadores: (d.jugadores || []).map(n), bazas: (d.bazas || []).slice(0, 3).map((b) => {
+    const c = {}; for (const j of d.jugadores || []) c[n(j)] = carta(b.cartas?.[j]); return { cartas: c, gana: [0, 1, "parda"].includes(b.gana) ? b.gana : null }; }) }));
+  const TIPOS = ["jugar", "canto", "quiero", "no_quiero", "con_flor_me_achico", "tanto", "son_buenas", "son_mejores", "en_mesa", "mostrar", "mazo", "seguir"];
+  v.acciones = (Array.isArray(v.acciones) ? v.acciones : []).filter((a) => a && TIPOS.includes(a.t) && (a.t !== "canto" || a.c in CANTO) && (a.t !== "jugar" || idValido(a.carta)))
+    .map((a) => (a.t === "canto" ? { t: a.t, c: a.c } : a.t === "jugar" ? { t: a.t, carta: a.carta } : { t: a.t }));
+  v.resumenMano = Array.isArray(v.resumenMano) ? v.resumenMano.map((x) => ({ quien: x.quien === 1 ? 1 : 0, motivo: String(x.motivo ?? ""), puntos: n(x.puntos), duelo: x.duelo })) : null;
+  return v;
+}
+
+async function procesar(v, eventos) {
+  if (modo === "invitado") v = sanear(v);
+  const prev = vista;
+  if (!carasEl.length || carasEl.length !== v.n || prev?.yo !== v.yo) armarAsientos(v);
+  if (eventos.some((e) => e.t === "reparto")) { cerrarCapa(); bandeja = null; await juntar(); vista = v; render(eventos, false, true); }
+  else { vista = v; render(eventos, false, false); }
+  cantar(eventos, prev);
+}
+
+// ---------- ubicación de los asientos ----------
+const LUGARES = {
+  4: [null, [0.88, 0.5], [0.5, 0.07], [0.12, 0.5]],
+  6: [null, [0.87, 0.7], [0.87, 0.26], [0.5, 0.06], [0.13, 0.26], [0.13, 0.7]],
+};
+function medidas() {
+  const mesa = $("#eq-mesa"), W = mesa.clientWidth, H = mesa.clientHeight, barH = $("#eq-acciones").offsetHeight;
+  const cx = W / 2, ancho = Math.min(W, 560);
+  const cw = Math.min(ancho * 0.24, 112, (H - barH) * 0.15), ch = cw * RATIO;
+  const manoY = H - barH - ch / 2 - 4;
+  const top = (parseFloat(getComputedStyle($("#mesa-eq .barra")).height) || 52) + 6;
+  const bottom = manoY - ch / 2 - 8;
+  const RH = bottom - top;
+  const cara = Math.max(44, Math.min(W * 0.15, 78, RH * 0.15));
+  const tw = Math.min(ancho * 0.14, 66, RH * 0.17 / RATIO);
+  return { W, H, cx, cw, ch, manoY, top, bottom, RH, cara, tw, ancho };
+}
+function lugarDe(j, v, m) {
+  const r = (j - v.yo + v.n) % v.n;
+  if (r === 0) return { x: Math.max(m.cara / 2 + 12, m.cx - m.ancho / 2 + m.cara / 2 + 12), y: m.bottom - m.cara * 0.62 };
+  const [fx, fy] = LUGARES[v.n][r];
+  const ancho = Math.min(m.W, 620), x0 = m.cx - ancho / 2;
+  return { x: x0 + fx * ancho, y: m.top + m.cara * 0.55 + fy * (m.RH - m.cara * 1.6) };
+}
+function centro(m) { return { x: m.cx, y: m.top + m.RH * 0.47 }; }
+function lugarCarta(j, v, m) {
+  const r = (j - v.yo + v.n) % v.n, c = centro(m);
+  if (r === 0) return { x: m.cx, y: c.y + m.RH * 0.15 };
+  const p = lugarDe(j, v, m), t = v.n === 6 ? 0.5 : 0.56;
+  return { x: p.x + (c.x - p.x) * t, y: p.y + (c.y - p.y) * t };
+}
+
+function armarAsientos(v) {
+  carasEl.forEach((c) => { c.parar(); c.el.remove(); });
+  carasEl = [];
+  const cont = $("#eq-asientos");
+  for (let j = 0; j < v.n; j++) {
+    const el = document.createElement("div");
+    el.className = "asiento " + (E.equipoDe(j) === v.equipo ? "nos" : "ellos") + (j === v.yo ? " yo" : "");
+    el.innerHTML = K.cara(j, j === v.yo ? "tu cara" : `cara de ${esc(v.nombres[j])}`) + `<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div><div class="quedan"></div>`;
+    cont.appendChild(el);
+    const svg = el.querySelector("svg");
+    carasEl.push({ el, svg, parar: K.parpadear(svg) });
+  }
+}
+
+/** La baza que se ve en la mesa: la que está en curso o, si recién empezó, la que acaba de terminar. */
+function bazaVisible(bazas) {
+  if (!bazas?.length) return null;
+  const ult = bazas[bazas.length - 1];
+  const tiene = (b) => Object.values(b.cartas).some(Boolean);
+  if (tiene(ult) || bazas.length === 1) return ult;
+  return bazas[bazas.length - 2];
+}
+
+function cartasEnMesa(v) {
+  const out = []; // { j, id, gana, apagada }
+  const marcar = (b, asientosB) => {
+    if (!b) return;
+    const ids = asientosB.map((j) => ({ j, id: b.cartas[j] })).filter((x) => x.id);
+    const cerrada = b.gana !== null && b.gana !== undefined;
+    const max = ids.length ? Math.max(...ids.map((x) => jerarquia(x.id))) : 0;
+    for (const x of ids) {
+      const gana = cerrada && b.gana !== "parda" && E.equipoDe(x.j) === b.gana && jerarquia(x.id) === max;
+      out.push({ ...x, gana, apagada: cerrada && b.gana !== "parda" && E.equipoDe(x.j) !== b.gana });
+    }
+  };
+  if (v.tipoMano === "punta" && v.duelos) for (const d of v.duelos) marcar(bazaVisible(d.bazas), d.jugadores);
+  else if (v.bazas) marcar(bazaVisible(v.bazas), Array.from({ length: v.n }, (_, j) => j));
+  return out;
+}
+
+function posiciones(v, m) {
+  const out = [];
+  const jugables = new Set((v.acciones || []).filter((a) => a.t === "jugar").map((a) => a.carta));
+  const n = v.miMano.length;
+  v.miMano.forEach((id, i) => {
+    const off = i - (n - 1) / 2, sel = id === elegida;
+    out.push({ key: id, id, x: m.cx + off * m.cw * 0.74, y: m.manoY + Math.abs(off) * m.cw * 0.07 - (sel ? m.ch * 0.16 : 0), w: m.cw, r: sel ? 0 : off * 8, arriba: true, z: 50 + i, jugable: jugables.has(id), elegida: sel, mia: true });
+  });
+  cartasEnMesa(v).forEach((c, i) => {
+    const p = lugarCarta(c.j, v, m);
+    out.push({ key: c.id, id: c.id, x: p.x, y: p.y, w: m.tw, r: giroDe(c.id), arriba: true, z: 30 + i, gana: c.gana, apagada: c.apagada, de: c.j });
+  });
+  return out;
+}
+const giroDe = (id) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return (Math.abs(h) % 13) - 6; };
+
+function crearCarta(key, id) {
+  const el = document.createElement("div");
+  el.className = "carta abajo sin-anim"; el.dataset.key = key;
+  el.innerHTML = `<div class="giro"><div class="cara frente">${id ? frente(id) : ""}</div><div class="cara dorso">${dorso()}</div></div>`;
+  el.addEventListener("click", () => tocarCarta(el));
+  $("#eq-mesa").appendChild(el); cartasEl.set(key, el);
+  return el;
+}
+function ubicar(el, p) {
+  const h = p.w * RATIO;
+  el.style.width = p.w + "px"; el.style.height = h + "px";
+  el.style.transform = `translate(${p.x - p.w / 2}px, ${p.y - h / 2}px) rotate(${p.r}deg)`;
+  el.style.zIndex = p.z;
+}
+function tocarCarta(el) {
+  const id = el.dataset.key;
+  if (!el.classList.contains("jugable")) return;
+  S.desbloquear();
+  if (elegida === id) enviarAccion({ t: "jugar", carta: id });
+  else { elegida = id; S.roce(0, 0.1, 0.05); render([], false); }
+}
+
+async function juntar() {
+  if (!cartasEl.size) return;
+  const m = medidas(), c = centro(m);
+  for (const el of cartasEl.values()) { el.style.transitionDelay = "0ms"; el.classList.add("abajo"); ubicar(el, { x: c.x, y: c.y, w: m.tw, r: 0, z: 60 }); }
+  S.roce(0, 0.5, 0.08);
+  await espera(520);
+  for (const el of cartasEl.values()) el.remove();
+  cartasEl.clear();
+  S.riffle(0, 0.7);
+  await espera(500);
+}
+
+function render(eventos, sinAnim, reparto) {
+  const v = vista, m = medidas();
+  $("#mesa-eq").style.setProperty("--cara", m.cara + "px");
+  if (elegida && !v.miMano.includes(elegida)) elegida = null;
+  renderAsientos(v, m);
+
+  const ps = posiciones(v, m), vivos = new Set(ps.map((p) => p.key)), c = centro(m);
+  for (const [k, el] of cartasEl) if (!vivos.has(k)) { el.remove(); cartasEl.delete(k); }
+  ps.forEach((p, orden) => {
+    let el = cartasEl.get(p.key), nueva = false;
+    if (!el) {
+      nueva = true; el = crearCarta(p.key, p.id);
+      if (reparto) ubicar(el, { x: c.x, y: c.y, w: m.tw, r: 0, z: 100 });
+      else if (p.de !== undefined && p.de !== v.yo) { const s = lugarDe(p.de, v, m); ubicar(el, { x: s.x, y: s.y, w: m.tw * 0.7, r: 0, z: p.z }); }
+      else { ubicar(el, p); el.style.opacity = 0; }
+    }
+    el.classList.toggle("jugable", !!p.jugable);
+    el.classList.toggle("elegida", !!p.elegida);
+    el.classList.toggle("gana", !!p.gana);
+    el.classList.toggle("apagada", !!p.apagada);
+    if (p.jugable) { el.setAttribute("role", "button"); el.tabIndex = 0; el.setAttribute("aria-label", nombreCarta(p.id) + (p.elegida ? ", tocá de nuevo para tirarla" : "")); }
+    else { el.removeAttribute("role"); el.tabIndex = -1; el.setAttribute("aria-label", nombreCarta(p.id)); }
+    if (sinAnim) { el.classList.add("sin-anim"); ubicar(el, p); el.classList.remove("abajo"); el.style.opacity = 1; return; }
+    const demora = reparto ? orden * 160 : 0;
+    el.getBoundingClientRect();
+    el.classList.remove("sin-anim");
+    el.style.transitionDelay = demora + "ms";
+    requestAnimationFrame(() => {
+      ubicar(el, p); el.style.opacity = 1;
+      if (reparto && nueva) { setTimeout(() => el.classList.remove("abajo"), demora + 480); S.roce(demora / 1000, 0.12, 0.05); }
+      else if (nueva && p.de !== undefined && p.de !== v.yo) { setTimeout(() => { el.classList.remove("abajo"); S.chasquido(0, 0.24); }, 160); S.golpe(0.45, 0.14); }
+      else el.classList.remove("abajo");
+      setTimeout(() => (el.style.transitionDelay = "0ms"), demora + 20);
+    });
+  });
+  for (const e of eventos) if (e.t === "jugada" && e.jugador === v.yo) { S.roce(0, 0.15, 0.06); S.golpe(0.45, 0.14); }
+
+  renderEstado(v, m); renderNota(v); renderAcciones(v); renderGestos(v, m); renderTanteador(v);
+  clearTimeout(render.fin);
+  if (v.fase === "fin_mano" || v.fase === "fin_partida") {
+    const recien = eventos.some((e) => e.t === "fin_mano" || e.t === "fin_partida");
+    const capa = $("#capa"), abierta = !capa.hidden && capa.dataset.tipo === "fin";
+    if (recien || abierta || capaCerradaMano !== v.numeroMano || v.fase === "fin_partida")
+      render.fin = setTimeout(() => abrirCapa(v.fase === "fin_partida" ? hojaFinPartida() : hojaFinMano()), recien ? 1700 : 50);
+  } else if ($("#capa").dataset.tipo === "fin") cerrarCapa();
+}
+
+function renderAsientos(v, m) {
+  const turnoDuelo = v.tipoMano === "punta" && v.duelos;
+  v.nombres.forEach((nombre, j) => {
+    const c = carasEl[j]; if (!c) return;
+    const p = lugarDe(j, v, m);
+    c.el.style.left = p.x + "px"; c.el.style.top = p.y + "px";
+    c.el.querySelector(".n").textContent = j === v.yo ? "vos" : nombre;
+    const chips = [];
+    if (v.mano === j && v.fase === "jugando") chips.push("mano");
+    if (v.tipoMano === "redonda" && v.pies?.includes(j) && v.fase === "jugando") chips.push("pie");
+    if (v.alMazo[j]) chips.push("al mazo");
+    if (turnoDuelo && v.miDuelo?.contra === j) chips.push("tu duelo");
+    c.el.querySelector(".chips").innerHTML = chips.map((t) => `<span class="mini-chip">${t}</span>`).join("");
+    c.el.querySelector(".quedan").innerHTML = j === v.yo ? "" : "<span></span>".repeat(v.alMazo[j] ? 0 : v.cartasEnMano[j]);
+    c.el.classList.toggle("turno", v.fase === "jugando" && v.turno === j);
+    c.el.classList.toggle("mazo", !!v.alMazo[j]);
+    c.el.classList.toggle("apagado", !!turnoDuelo && j !== v.yo && v.miDuelo?.contra !== j);
+  });
+}
+
+// ---------- textos ----------
+function pendienteVisible(v) {
+  if (v.tipoMano === "punta" && v.miDuelo) {
+    const dv = v.miDuelo.vista, jug = v.duelos[v.miDuelo.duelo].jugadores;
+    return dv.cantoPendiente ? { c: dv.cantoPendiente.c, de: jug[dv.cantoPendiente.de], responde: jug[1 - dv.cantoPendiente.de] } : null;
+  }
+  return v.cantoPendiente;
+}
+
+function renderEstado(v, m) {
+  const el = $("#eq-estado"), quien = (j) => (j === v.yo ? "vos" : `<b>${esc(v.nombres[j])}</b>`);
+  let t = "";
+  const acc = v.acciones || [], p = pendienteVisible(v);
+  if (v.fase === "fin_partida") t = v.ganador === v.equipo ? "<b>¡Ganamos la partida!</b>" : "Ganaron <b>ellos</b>";
+  else if (v.fase === "fin_mano") t = "Terminó la mano";
+  else if (p) {
+    const c = esc(CANTO[p.c] || p.c);
+    t = p.de === v.yo ? `Cantaste ${c}. ` : `${quien(p.de)} cantó <b>${c}</b>. `;
+    t += p.responde === v.yo ? "<b>Contestás vos</b>" : `Contesta ${quien(p.responde)}…`;
+  } else if (acc.some((a) => a.t === "tanto")) t = "Decí tu tanto";
+  else if (acc.some((a) => a.t === "son_buenas" || a.t === "son_mejores")) t = "Te toca decir el tanto";
+  else if (v.envido?.estado === "querido" && v.envido.habla != null) t = `${quien(v.envido.habla)} dice el tanto…`;
+  else if (v.turno === v.yo) t = elegida ? "Tocala de nuevo para tirarla" : "<b>Te toca</b>";
+  else if (v.alMazo[v.yo]) t = "Te fuiste al mazo. Mirá cómo sigue tu equipo";
+  else if (v.turno != null) t = `Juega ${quien(v.turno)}…`;
+  else if (v.tipoMano === "punta") t = "Esperando los otros duelos…";
+  if (v.tipoMano === "punta" && v.fase === "jugando" && v.miDuelo) t = `<span class="punta">punta y hacha · contra ${esc(v.nombres[v.miDuelo.contra])}</span><br>` + t;
+  el.innerHTML = t;
+  const yo = lugarDe(v.yo, v, m);
+  el.style.top = (yo.y - m.cara * 0.6 - (v.tipoMano === "punta" ? 54 : 34)) + "px";
+}
+
+function renderNota(v) {
+  const el = $("#eq-bazas"), lineas = [];
+  const fuente = v.tipoMano === "punta" && v.miDuelo ? null : v;
+  if (fuente?.bazas) fuente.bazas.forEach((b, i) => { if (b.gana != null) lineas.push(`${i + 1}ª ${b.gana === "parda" ? "parda" : nombreEquipo(b.gana)}`); });
+  if (v.tipoMano === "punta" && v.miDuelo) {
+    const dv = v.miDuelo.vista, l = v.miDuelo.local;
+    dv.bazas.forEach((b, i) => { if (b.gana != null) lineas.push(`${i + 1}ª ${b.gana === "parda" ? "parda" : b.gana === l ? "vos" : v.nombres[v.miDuelo.contra]}`); });
+    if (dv.truco?.nivel > 1) lineas.push(["", "", "truco", "retruco", "vale cuatro"][dv.truco.nivel] + " querido");
+    if (dv.envido?.ganador != null && dv.envido.puntos != null) lineas.push(`envido: ${dv.envido.ganador === l ? "vos" : v.nombres[v.miDuelo.contra]} +${dv.envido.puntos}`);
+  } else {
+    if (v.truco?.nivel > 1) lineas.push(["", "", "truco", "retruco", "vale cuatro"][v.truco.nivel] + " querido");
+    const e = v.envido;
+    if (e) {
+      const dichos = e.tantos.map((t, j) => (t == null ? null : `${j === v.yo ? "vos" : v.nombres[j]} ${t}`)).filter(Boolean);
+      if (dichos.length) lineas.push(dichos.join(" · "));
+      if (e.puntos != null && e.ganador != null && e.estado !== "querido") lineas.push(`envido: ${nombreEquipo(e.ganador)} +${e.puntos}`);
+      if (e.enMesaPedido) lineas.push(e.mostradas?.length ? `mostró: ${e.mostradas.map(nombreCarta).join(", ")}` : "pidieron las cartas en mesa");
+    }
+    if (v.florCantada?.estado === "resuelta") lineas.push(`flor: ${nombreEquipo(v.florCantada.ganador)} +${v.florCantada.puntos}`);
+  }
+  // texto plano: lo que llega por la red nunca se interpreta como HTML
+  el.replaceChildren(...lineas.map((l) => { const s = document.createElement("span"); s.textContent = String(l); return s; }));
+}
+
+function miTanto(v) {
+  try {
+    if (v.tipoMano === "punta" && v.miDuelo) {
+      const dv = v.miDuelo.vista; return tantoDe([...dv.miMano, ...dv.bazas.map((b) => b["c" + v.miDuelo.local]).filter(Boolean)]);
+    }
+    return tantoDe([...v.miMano, ...(v.bazas || []).map((b) => b.cartas[v.yo]).filter(Boolean)]);
+  } catch { return null; }
+}
+
+function renderAcciones(v) {
+  const nav = $("#eq-acciones"), acc = v.acciones || [];
+  nav.innerHTML = "";
+  const fila = () => { const f = document.createElement("div"); f.className = "fila-acc"; nav.appendChild(f); return f; };
+  const boton = (f, txt, clase, fn) => { const b = document.createElement("button"); b.className = "b " + clase; b.textContent = txt; b.onclick = () => { S.desbloquear(); fn(); }; f.appendChild(b); return b; };
+  if (v.fase === "fin_partida") {
+    const f = fila();
+    if (modo === "invitado") boton(f, "Pedir otra partida", "fuerte", () => { red.enviar({ t: "revancha" }); aviso("Le avisé al que armó la mesa"); });
+    else boton(f, "Otra partida", "fuerte", nuevaPartidaMismaMesa);
+    return;
+  }
+  const resp = acc.filter((a) => ["quiero", "no_quiero", "con_flor_me_achico", "son_buenas", "son_mejores", "tanto", "mostrar", "seguir"].includes(a.t));
+  const cantos = acc.filter((a) => a.t === "canto");
+  const chicas = acc.filter((a) => a.t === "en_mesa" || a.t === "mazo");
+  if (resp.length) {
+    const f = fila(), t = miTanto(v);
+    for (const a of resp) {
+      const txt = { quiero: "Quiero", no_quiero: "No quiero", con_flor_me_achico: "Con flor me achico", son_buenas: "Son buenas", son_mejores: `¡${t ?? ""} son mejores!`, tanto: `Tengo ${t ?? ""}`, mostrar: "Mostrar las cartas", seguir: "Siguiente mano" }[a.t];
+      boton(f, txt, ["quiero", "tanto", "son_mejores", "mostrar", "seguir"].includes(a.t) ? "fuerte" : "", () => enviarAccion(a));
+    }
+  }
+  if (cantos.length) {
+    const env = cantos.filter((a) => !TRUCOS.includes(a.c)), tru = cantos.filter((a) => TRUCOS.includes(a.c));
+    for (const grupo of [env, tru]) if (grupo.length) { const f = fila(); for (const a of grupo) boton(f, BOTON_CANTO[a.c] || a.c, "canto", () => enviarAccion(a)); }
+  }
+  if (chicas.length) {
+    const f = fila();
+    for (const a of chicas) {
+      if (a.t === "en_mesa") boton(f, "Las quiero en mesa", "chico alerta", () => enviarAccion(a));
+      else {
+        const b = boton(f, "Irme al mazo", "chico", () => {
+          if (!confirmaMazo) { confirmaMazo = true; b.textContent = "¿Seguro? Tocá de nuevo"; b.classList.add("alerta"); setTimeout(() => { confirmaMazo = false; if (b.isConnected) { b.textContent = "Irme al mazo"; b.classList.remove("alerta"); } }, 2500); }
+          else enviarAccion(a);
+        });
+      }
+    }
+  }
+  if (!nav.children.length) { const d = document.createElement("p"); d.className = "vacio"; d.textContent = v.turno === v.yo ? "tirá una carta" : ""; nav.appendChild(d); }
+}
+
+// ---------- señas, cabeza y preguntas ----------
+function renderGestos(v, m) {
+  const cont = $("#eq-gestos"), band = $("#eq-bandeja");
+  const puede = v.fase === "jugando" && v.tipoMano === "redonda" && !v.alMazo[v.yo];
+  if (!puede) { cont.hidden = true; band.hidden = true; bandeja = null; return; }
+  const soyPie = v.pies?.[v.equipo] === v.yo;
+  cont.hidden = false;
+  const p = lugarDe(v.yo, v, m);
+  cont.style.left = (p.x + m.cara * 0.62) + "px";
+  cont.style.top = (p.y - 18) + "px";
+  const pestañas = [["sena", "señas"], ["cabeza", "cabeza"], ...(soyPie ? [["pregunta", "preguntar"]] : [])];
+  if (bandeja === "pregunta" && !soyPie) bandeja = null;
+  cont.innerHTML = pestañas.map(([k, t]) => `<button class="pestana" data-g="${k}" aria-pressed="${bandeja === k}">${t}</button>`).join("");
+  cont.onclick = (e) => { const b = e.target.closest("[data-g]"); if (!b) return; bandeja = bandeja === b.dataset.g ? null : b.dataset.g; renderGestos(vista, medidas()); };
+  if (!bandeja) { band.hidden = true; return; }
+  band.hidden = false;
+  band.style.bottom = (m.H - (p.y - m.cara * 0.62) + 6) + "px"; // arriba de tu cara, para que veas la seña que hacés
+  let botones = [];
+  if (bandeja === "sena") botones = K.SENAS.filter((s) => s.k !== "flor" || v.flor).map((s) => [s.k, s.carta, s.nombre]);
+  if (bandeja === "cabeza") botones = K.CABEZA.map((c) => [c.k, c.nombre, c.gesto]);
+  if (bandeja === "pregunta") botones = K.PREGUNTAS.filter((q) => !q.soloFlor || v.flor).map((q) => [q.k, q.texto, ""]);
+  band.innerHTML = `<p class="ayuda">${{ sena: "Tu cara la hace un instante. La ven todos.", cabeza: "Contestale a tu compañero con la cabeza.", pregunta: "Sos el pie: preguntale a tu equipo." }[bandeja]}</p>`
+    + `<div class="botones">${botones.map(([k, t, sub]) => `<button class="b" data-k="${k}" title="${esc(sub)}">${esc(t)}</button>`).join("")}</div>`;
+  band.onclick = (e) => { const b = e.target.closest("[data-k]"); if (b) hacerGesto(bandeja, b.dataset.k); };
+}
+
+// ---------- cantos: voz y bocadillo junto a la cara ----------
+function claveVoz(e, prev) {
+  if (e.t === "canto") return e.c === "envido" && prev?.cantoPendiente?.c === "envido" ? "envido_envido" : e.c;
+  if (e.t === "respuesta") return e.r;
+  if (e.t === "tanto") return "tengo_" + e.n;
+  if (e.t === "en_mesa") return "en_mesa";
+  if (e.t === "mazo") return "mazo";
+  return null;
+}
+function cantar(eventos, prev) {
+  let t = 0;
+  for (const e of eventos) {
+    if (e.t === "fin_partida") { const k = e.ganador === vista.equipo ? "gane" : "perdi"; setTimeout(() => S.decir(k), t + 1200); continue; }
+    if (e.t === "reparto" && e.tipo === "punta") { setTimeout(() => anuncio("¡Punta y hacha!"), 700); continue; }
+    const k = claveVoz(e, prev); if (!k) continue;
+    const dichos = [];
+    if (e.t === "canto" && ENVIDOS.includes(e.c) && TRUCOS.includes(prev?.cantoPendiente?.c)) dichos.push("envido_primero");
+    dichos.push(k);
+    for (const d of dichos) {
+      const texto = d.startsWith("tengo_") ? `Tengo ${e.n}` : DICHO[d] || d;
+      setTimeout(() => { S.decir(d); bocadillo(e.jugador, texto); if (e.t === "canto") pulsoLampara(); }, t);
+      t += 1150;
+    }
+    prev = null;
+  }
+}
+function bocadillo(j, texto, pregunta = false) {
+  if (!vista || j == null) return;
+  const m = medidas(), p = lugarDe(j, vista, m), el = document.createElement("div");
+  el.className = "bocadillo eq-boca" + (j === vista.yo ? "" : " rival") + (pregunta ? " pregunta" : "");
+  el.textContent = texto;
+  const x = Math.min(m.W - 90, Math.max(90, p.x));
+  el.style.left = x + "px";
+  el.style.top = (p.y + (p.y < m.top + m.RH * 0.3 ? m.cara * 0.55 : -m.cara * 1.1)) + "px";
+  $("#eq-bocadillos").appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+function anuncio(texto) {
+  const m = medidas(), c = centro(m), el = document.createElement("div");
+  el.className = "bocadillo eq-boca"; el.textContent = texto;
+  el.style.left = c.x + "px"; el.style.top = (c.y - 30) + "px";
+  $("#eq-bocadillos").appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+function pulsoLampara() {
+  const j = $("#mesa-eq"); j.classList.add("luz-alta");
+  clearTimeout(pulsoLampara.t); pulsoLampara.t = setTimeout(() => j.classList.remove("luz-alta"), 1400);
+}
+
+// ---------- tanteador y hojas ----------
+function fosforos(p, meta, s = 22, gap = 10) {
+  const grupos = meta / 5, alto = grupos * (s + gap) + (meta === 30 ? 16 : 0), w = s + 12;
+  let svg = `<svg viewBox="-6 -4 ${w} ${alto + 4}" width="${w}" height="${alto + 4}" aria-hidden="true">`;
+  const lados = [[0, 0, 0, 1], [0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 1, 1]];
+  for (let g = 0; g < grupos; g++) {
+    const oy = g * (s + gap) + (meta === 30 && g >= 3 ? 16 : 0);
+    if (meta === 30 && g === 3) svg += `<line x1="-6" y1="${oy - 11}" x2="${s + 6}" y2="${oy - 11}" stroke="#b8621b" stroke-width="1.4" stroke-dasharray="3 3"/>`;
+    for (let k = 0; k < 5; k++) {
+      if (g * 5 + k >= p) break;
+      const [x1, y1, x2, y2] = lados[k], jit = ((g * 5 + k) * 37 % 7 - 3) * 0.5;
+      const ax = x1 * s + jit * 0.3, ay = oy + y1 * s, bx = x2 * s - jit * 0.2, by = oy + y2 * s + jit * 0.3;
+      svg += `<line x1="${ax}" y1="${ay}" x2="${bx}" y2="${by}" stroke="#3b3024" stroke-width="2.2" stroke-linecap="round"/><circle cx="${bx}" cy="${by}" r="2.6" fill="#b8621b"/>`;
+    }
+  }
+  return svg + "</svg>";
+}
+function servilleta(v, s) {
+  const col = (eq) => `<div class="col"><span class="quien">${nombreEquipo(eq)}</span><span class="num">${v.puntos[eq]}${v.meta === 30 ? (v.puntos[eq] >= 15 ? " · buenas" : " · malas") : ""}</span>${fosforos(v.puntos[eq], v.meta, s)}</div>`;
+  return `<div class="cols">${col(v.equipo)}${col(1 - v.equipo)}</div>`;
+}
+function renderTanteador(v) {
+  $("#eq-tanteador").innerHTML = `<svg viewBox="0 0 14 22" aria-hidden="true"><line x1="7" y1="20" x2="7" y2="5" stroke="#3b3024" stroke-width="2" stroke-linecap="round"/><circle cx="7" cy="4.5" r="3" fill="#b8621b"/></svg><span>nos <b>${v.puntos[v.equipo]}</b> · <b>${v.puntos[1 - v.equipo]}</b></span>`;
+  $("#eq-titulo").textContent = `${v.n === 6 ? "3 contra 3" : "2 contra 2"} · a ${v.meta}`;
+}
+function hojaTanteador() {
+  return `<div class="hoja servilleta-hoja"><h2>Tanteador</h2><p class="sala">a ${vista.meta}${vista.flor ? " · con flor" : ""}${vista.puntaYHacha ? " · punta y hacha" : ""}</p>
+    <div class="servilleta">${servilleta(vista, vista.meta === 30 ? 20 : 26)}</div><button class="b" data-cerrar>Volver a la mesa</button></div>`;
+}
+function hojaFinMano() {
+  const v = vista, r = v.resumenMano || [];
+  const duelo = (k) => { const d = v.duelos?.[k]; return d ? ` <small>(${d.jugadores.map((j) => esc(nombreDe(j))).join(" vs ")})</small>` : ""; };
+  const filas = r.length ? r.map((x) => `<li><span>${nombreEquipo(x.quien)} · ${esc(x.motivo)}${x.duelo !== undefined ? duelo(x.duelo) : ""}</span><b>+${x.puntos}</b></li>`).join("") : "<li><span>Sin puntos</span><b>0</b></li>";
+  const acc = v.acciones || [], puede = acc.some((a) => a.t === "seguir"), muestra = acc.some((a) => a.t === "mostrar");
+  const faltan = v.nombres.map((n, j) => (!v.listos[j] && j !== v.yo ? n : null)).filter(Boolean);
+  const avisoMesa = muestra ? "<p><b>Te pidieron las cartas en mesa.</b> Si seguís sin mostrarlas, el envido es para ellos.</p>" : "";
+  return `<div class="hoja" data-tipo="fin"><h2>Terminó la mano</h2><p class="sala">nosotros ${v.puntos[v.equipo]} · ellos ${v.puntos[1 - v.equipo]} · a ${v.meta}</p><ul>${filas}</ul>${avisoMesa}
+    ${muestra ? '<button class="b" data-accion="mostrar">Mostrar las cartas</button>' : ""}
+    ${puede ? `<button class="b${muestra ? " claro" : ""}" data-accion="seguir">Siguiente mano</button>` : `<p>Esperando a ${esc(faltan.join(", ")) || "los demás"}…</p>`}
+    <button class="b claro" data-cerrar>Ver la mesa</button></div>`;
+}
+function hojaFinPartida() {
+  const v = vista, gane = v.ganador === v.equipo;
+  const otra = modo === "invitado" ? '<button class="b" data-revancha>Pedir otra partida</button>' : '<button class="b" data-otra>Otra partida</button>';
+  return `<div class="hoja" data-tipo="fin"><h2>${gane ? "¡Ganamos!" : "Ganaron ellos"}</h2><p class="sala">partida a ${v.meta}</p>
+    <div class="marcador">nosotros ${v.puntos[v.equipo]} — ${v.puntos[1 - v.equipo]} ellos</div><div class="servilleta">${servilleta(v, v.meta === 30 ? 16 : 22)}</div>${otra}<button class="b claro" data-cerrar>Ver la mesa</button></div>`;
+}
+function hojaMenu() {
+  const link = codigo ? `<button class="b claro" data-copiar>Copiar el link de la mesa</button>` : "";
+  const ausentes = modo === "anfitrion" && asientos.some((a) => a.tipo === "persona" && !a.conectado);
+  return `<div class="hoja"><h2>Menú</h2><p class="sala">${modo === "practica" ? "práctica con bots" : "mesa por link"} · ${vista.n === 6 ? "3 contra 3" : "2 contra 2"} · a ${vista.meta}${vista.flor ? " · con flor" : ""}${vista.puntaYHacha ? " · punta y hacha" : ""}</p>
+    <button class="b claro" data-sonido>${S.estaActivo() ? "Silenciar las voces" : "Prender las voces"}</button>${link}
+    ${ausentes ? '<button class="b claro" data-bots>Poner bots en lugar de los que se fueron</button>' : ""}
+    <button class="b claro" data-reglas>Reglas en equipo</button><button class="b claro" data-salir>Salir de la mesa</button><button class="b" data-cerrar>Volver</button></div>`;
+}
+function hojaReglas() {
+  return `<div class="hoja"><h2>Reglas en equipo</h2>
+  <p><b>Equipos:</b> se sientan alternados. Se juega en orden desde la mano. La baza la gana el equipo de la carta más alta.</p>
+  <p><b>El pie habla:</b> los cantos del otro equipo los contesta el pie (el último de tu equipo en jugar). Puede preguntarles a los compañeros; ellos contestan solo con la cabeza.</p>
+  <p><b>Señas:</b> duran un instante y las ven todos, rivales incluidos. 1 de espada: cejas · 1 de basto: guiño · 7 de espada: boca a la derecha · 7 de oro: boca a la izquierda · tres: muerde el labio · dos: trompita · ancho falso: lengua · flor: cachetes · nada: ojos cerrados.</p>
+  <p><b>Al mazo</b> se va cada uno: tus compañeros pueden seguir sin vos. Si se van todos, el equipo pierde la mano.</p>
+  <p><b>Punta y hacha:</b> si está prendida, entre 5 y 25 (a 30) se alterna una mano normal con una de duelos: cada uno contra el suyo, y lo que gana suma para el equipo.</p>
+  <button class="b" data-cerrar>Volver</button></div>`;
+}
+function abrirCapa(html) {
+  const c = $("#capa"); c.innerHTML = html; c.hidden = false;
+  c.dataset.tipo = c.querySelector("[data-tipo]")?.dataset.tipo || "";
+  c.onclick = (e) => {
+    const t = e.target;
+    if (t === c || t.closest("[data-cerrar]")) { if (c.dataset.tipo === "fin") capaCerradaMano = vista?.numeroMano; return cerrarCapa(); }
+    if (t.closest("[data-accion]")) { const a = t.closest("[data-accion]").dataset.accion; if (a === "seguir") cerrarCapa(); enviarAccion({ t: a }); }
+    if (t.closest("[data-otra]")) nuevaPartidaMismaMesa();
+    if (t.closest("[data-revancha]")) { red.enviar({ t: "revancha" }); aviso("Le avisé al que armó la mesa"); }
+    if (t.closest("[data-sonido]")) { S.setActivo(!S.estaActivo()); abrirCapa(hojaMenu()); }
+    if (t.closest("[data-copiar]")) copiarLink();
+    if (t.closest("[data-reglas]")) abrirCapa(hojaReglas());
+    if (t.closest("[data-bots]")) { asientos.forEach((a, j) => { if (a.tipo === "persona" && !a.conectado) asientos[j] = { tipo: "bot", nombre: a.nombre }; }); guardar(); cerrarCapa(); programarBots(); aviso("Los bots siguen por los que se fueron"); }
+    if (t.closest("[data-salir]")) { if (modo === "anfitrion") try { localStorage.removeItem("truco-mesa"); } catch {} location.href = location.pathname; }
+  };
+}
+function cerrarCapa() { const c = $("#capa"); c.hidden = true; c.innerHTML = ""; c.dataset.tipo = ""; }

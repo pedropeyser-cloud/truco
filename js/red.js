@@ -48,3 +48,49 @@ export function entrarSala(codigo, { alConectar, alMensaje, alCortar, alError })
   peer.on("error", e => { alError?.(e); if (e.type === "peer-unavailable" || e.type === "network" || e.type === "server-error") reintentar(); });
   return { enviar: m => { if (conn?.open) conn.send(m); }, cerrar: () => { cerrado = true; peer.destroy(); } };
 }
+
+// ---------- mesa de 4 o 6: el anfitrión recibe a varios invitados ----------
+// Cada invitado se identifica con un id propio (guardado en su navegador) para volver a su asiento si se corta.
+export function abrirSalaGrupo(codigo, maximo, { alAbrir, alEntrar, alMensaje, alSalir, alError }) {
+  let peer, intentos = 0;
+  const conns = new Map(); // conexión → id del invitado (null hasta el «hola»)
+  const crear = () => {
+    peer = new Peer(PREFIJO + codigo, ICE);
+    peer.on("open", () => { intentos = 0; alAbrir?.(); });
+    peer.on("connection", c => {
+      c.on("open", () => {
+        if ([...conns.keys()].filter(x => x.open).length >= maximo) { c.send({ t: "lleno" }); setTimeout(() => c.close(), 300); return; }
+        conns.set(c, null);
+      });
+      c.on("data", m => {
+        if (!m || typeof m !== "object") return;
+        if (m.t === "hola") {
+          const id = String(m.id || "").slice(0, 40) || Math.random().toString(36).slice(2);
+          // si ese id ya tenía otra conexión (recargó), la vieja se descarta
+          for (const [x, i] of conns) if (i === id && x !== c) { conns.delete(x); try { x.close(); } catch {} }
+          conns.set(c, id);
+          alEntrar?.(id, m);
+          return;
+        }
+        const id = conns.get(c);
+        if (id) alMensaje?.(id, m);
+      });
+      c.on("close", () => { const id = conns.get(c); conns.delete(c); if (id && ![...conns.values()].includes(id)) alSalir?.(id); });
+    });
+    peer.on("disconnected", () => { try { peer.reconnect(); } catch {} });
+    peer.on("error", e => {
+      if (e.type === "unavailable-id" && intentos++ < 8) { peer.destroy(); setTimeout(crear, 2500); return; }
+      alError?.(e);
+    });
+  };
+  crear();
+  const conDe = id => [...conns].find(([c, i]) => i === id && c.open)?.[0];
+  return {
+    enviar: (id, m) => { const c = conDe(id); if (c) c.send(m); },
+    enviarTodos: m => { for (const [c, i] of conns) if (i && c.open) c.send(m); },
+    conectados: () => [...new Set([...conns].filter(([c, i]) => i && c.open).map(([, i]) => i))],
+    echar: id => { const c = conDe(id); if (c) { c.send({ t: "lleno" }); setTimeout(() => c.close(), 300); } },
+    cerrar: () => peer.destroy(),
+  };
+}
+export const linkMesa = codigo => `${location.origin}${location.pathname}?mesa=${codigo}`;
