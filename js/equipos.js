@@ -97,12 +97,27 @@ export function nuevaPartida({ jugadores = 4, meta = 15, flor = false, puntaYHac
     semilla: sem, rng: sem,
     puntos: [0, 0], mano: 0, numeroMano: 0, ultimaFuePunta: false,
     fase: "fin_mano", ganador: null, resumenMano: null, ultimo: null,
+    poderes: { peluca: Array(jugadores).fill(0), trampa: Array(jugadores).fill(0) },
   };
   limpiarMano(s);
   s.mano = Math.floor(azar(s) * jugadores);
   s.turno = s.mano;
   return s;
 }
+
+/** Objetos de la gloria (ver motor.js): { peluca: [0|1 por asiento], trampa: [0|1 por asiento] }. */
+export function darPoderes(estado, poderes) {
+  const s = structuredClone(estado);
+  s.poderes = { peluca: Array(s.n).fill(0), trampa: Array(s.n).fill(0) };
+  for (const k of ["peluca", "trampa"]) for (let j = 0; j < s.n; j++) s.poderes[k][j] = poderes?.[k]?.[j] ? 1 : 0;
+  return s;
+}
+const poder = (s, k, j) => (s.poderes?.[k]?.[j] || 0) > 0;
+/** Peluca: sirve si sos el último de tu equipo en la mano (el que se va deja al equipo sin la mano). */
+const ultimoDeSuEquipo = (s, j) => Array.from({ length: s.n }, (_, x) => x).every((x) => x === j || equipoDe(x) !== equipoDe(j) || s.alMazo[x]);
+/** Rivales a los que se les puede hacer la trampa (antes del envido o la flor, con cartas en la mano). */
+const blancosTrampa = (s, j) => (!poder(s, "trampa", j) || s.envido || s.florCantada ? [] :
+  Array.from({ length: s.n }, (_, x) => x).filter((x) => equipoDe(x) !== equipoDe(j) && !s.alMazo[x] && s.enMano[x].length > 0));
 
 /** ¿La próxima mano es de punta y hacha? */
 function tocaPunta(s) {
@@ -213,6 +228,12 @@ function tantoALaVista(s) {
   return cartasDelTanto(s.manos[e.ganadorJugador]).every((id) => jugadas.includes(id));
 }
 
+/** El ganador del envido dijo más de lo que tenía. */
+function mintio(s) {
+  const e = s.envido, g = e.ganadorJugador;
+  return g != null && e.tantos[g] != null && tantoDe(s.manos[g]) < e.tantos[g];
+}
+
 function puedeMostrarAlFinal(s, j) {
   const e = s.envido;
   return !!e && e.estado === "resuelto" && j === e.ganadorJugador && e.enMesaPedido && !tantoALaVista(s)
@@ -263,7 +284,7 @@ export function acciones(estado, jugador) {
     const e = s.envido;
     if (e && e.estado === "querido") {
       if (!e.lider) return [{ t: "tanto" }];
-      return tantoDe(s.manos[j]) > e.lider.n ? [{ t: "son_mejores" }] : [{ t: "son_buenas" }];
+      return [{ t: "son_mejores" }, { t: "son_buenas" }]; // se puede mentir
     }
     const p = s.pendiente;
     if (p) {
@@ -289,6 +310,7 @@ export function acciones(estado, jugador) {
         if (p.c === "contraflor") lista.push(canto("contraflor_al_resto"));
       }
       lista.push({ t: "mazo" });
+      if (poder(s, "peluca", j) && ultimoDeSuEquipo(s, j)) lista.push({ t: "mazo_peluca" });
     } else {
       for (const carta of s.enMano[j]) lista.push({ t: "jugar", carta });
       if (puedeCantarEnvido(s, j)) ENVIDOS.forEach((c) => lista.push(canto(c)));
@@ -296,19 +318,22 @@ export function acciones(estado, jugador) {
       if (s.truco.nivel === 1) lista.push(canto("truco"));
       else if (s.truco.nivel < 4 && s.truco.quienPuedeSubir === equipoDe(j)) lista.push(canto(CANTO_DE_NIVEL[s.truco.nivel + 1]));
       lista.push({ t: "mazo" });
+      if (poder(s, "peluca", j) && ultimoDeSuEquipo(s, j)) lista.push({ t: "mazo_peluca" });
+      for (const a of blancosTrampa(s, j)) lista.push({ t: "trampa", a });
     }
   }
 
   const e = s.envido;
-  if (e && e.estado === "resuelto" && !tantoALaVista(s)) {
-    if (equipoDe(j) !== e.ganador && !e.enMesaPedido) lista.push({ t: "en_mesa" });
-    if (j === e.ganadorJugador && e.enMesaPedido && !s.alMazo[j]) lista.push({ t: "mostrar" });
+  if (e && e.estado === "resuelto") {
+    const oculto = !tantoALaVista(s);
+    if (equipoDe(j) !== e.ganador && !e.enMesaPedido && (oculto || mintio(s))) lista.push({ t: "en_mesa" });
+    if (j === e.ganadorJugador && e.enMesaPedido && !s.alMazo[j] && oculto) lista.push({ t: "mostrar" });
   }
   return lista;
 }
 
 function mismaAccion(a, b) {
-  return a.t === b.t && (a.c ?? null) === (b.c ?? null) && (a.carta ?? null) === (b.carta ?? null);
+  return a.t === b.t && (a.c ?? null) === (b.c ?? null) && (a.carta ?? null) === (b.carta ?? null) && (a.a ?? null) === (b.a ?? null);
 }
 
 // ---------- Aplicar ----------
@@ -370,9 +395,10 @@ function anotarMano(s) {
   const e = s.envido;
   if (e && e.estado === "no_querido") entradas.push({ quien: e.ganador, motivo: "envido no querido", puntos: e.puntos });
   if (e && e.estado === "resuelto") {
-    if (e.enMesaPedido && !tantoALaVista(s)) {
+    const oculto = !tantoALaVista(s);
+    if (e.enMesaPedido && (oculto || mintio(s))) {
       const perdedor = rival(e.ganador);
-      entradas.push({ quien: perdedor, motivo: "envido: no mostró las cartas", puntos: envidoQuerido(s, perdedor) });
+      entradas.push({ quien: perdedor, motivo: oculto ? "envido: no mostró las cartas" : "envido: mintió los puntos", puntos: envidoQuerido(s, perdedor) });
     } else {
       entradas.push({ quien: e.ganador, motivo: "envido", puntos: e.puntos });
     }
@@ -442,8 +468,8 @@ function aplicarPunta(s, j, accion) {
   } else if (accion.t === "mostrar") { // mostró con la mano terminada: se vuelve a sumar
     const antes = s.ganador;
     anotarPunta(s);
-    const env = s.resumenMano.find((x) => x.motivo === "envido" && x.duelo === k);
-    if (env) ev.push({ t: "puntos", equipo: env.quien, n: env.puntos, motivo: "envido", duelo: k });
+    const env = s.resumenMano.find((x) => x.motivo.startsWith("envido") && x.motivo !== "envido no querido" && x.duelo === k);
+    if (env) ev.push({ t: "puntos", equipo: env.quien, n: env.puntos, motivo: env.motivo, duelo: k });
     if (s.ganador !== null && s.ganador !== antes) ev.push({ t: "fin_partida", ganador: s.ganador });
   }
   return ev;
@@ -565,7 +591,8 @@ function aplicarRedonda(s, j, accion) {
 
     case "tanto":
     case "son_mejores": {
-      const n = tantoDe(s.manos[j]);
+      const n = M.numeroDicho(accion, tantoDe(s.manos[j]));
+      if (accion.t === "son_mejores" && n <= s.envido.lider.n) throw new Error("para «son mejores» hay que decir más");
       s.envido.tantos[j] = n;
       s.envido.lider = { equipo: eq, n, jugador: j };
       if (accion.t === "son_mejores") ev.push({ t: "respuesta", jugador: j, r: "son_mejores" });
@@ -590,15 +617,32 @@ function aplicarRedonda(s, j, accion) {
       if (s.fase !== "jugando") {
         const antes = s.ganador;
         anotarMano(s);
-        const env = s.resumenMano.find((x) => x.motivo === "envido");
-        if (env) ev.push({ t: "puntos", equipo: env.quien, n: env.puntos, motivo: "envido" });
+        const env = s.resumenMano.find((x) => x.motivo.startsWith("envido") && x.motivo !== "envido no querido");
+        if (env) ev.push({ t: "puntos", equipo: env.quien, n: env.puntos, motivo: env.motivo });
         if (s.ganador !== null && s.ganador !== antes) ev.push({ t: "fin_partida", ganador: s.ganador });
       }
       break;
     }
 
+    case "trampa": { // a la mano del rival elegido: una carta suya por una al azar de las que no se repartieron
+      const rival = accion.a;
+      s.poderes.trampa[j]--;
+      const usadas = new Set(s.manos.flat());
+      const resto = [];
+      for (const palo of PALOS) for (const n of NUMEROS) if (!usadas.has(`${n}-${palo}`)) resto.push(`${n}-${palo}`);
+      const vieja = s.enMano[rival][Math.floor(azar(s) * s.enMano[rival].length)];
+      const nueva = resto[Math.floor(azar(s) * resto.length)];
+      s.enMano[rival] = s.enMano[rival].map((x) => (x === vieja ? nueva : x));
+      s.manos[rival] = s.manos[rival].map((x) => (x === vieja ? nueva : x));
+      ev.push({ t: "trampa", jugador: j, a: rival });
+      break;
+    }
+
+    case "mazo_peluca":
     case "mazo": {
-      ev.push({ t: "mazo", jugador: j });
+      const peluca = accion.t === "mazo_peluca";
+      if (peluca) s.poderes.peluca[j]--;
+      ev.push({ t: "mazo", jugador: j, ...(peluca ? { peluca: true } : {}) });
       s.alMazo[j] = true;
       if (pieDe(s, eq) !== undefined) { // quedan compañeros: siguen jugando sin él
         if (p && p.responde === j) { // le tocaba contestar: contesta el compañero
@@ -620,9 +664,9 @@ function aplicarRedonda(s, j, accion) {
         if (p.c === "flor") cerrarFlor(s, equipoDe(p.de), 4, "con flor me achico");
         else cerrarFlor(s, equipoDe(p.de), florNoQuerida(s.florCantada.cantos), `${p.c.replace(/_/g, " ")} no querida`);
       }
-      if (!s.envido && !s.florCantada && enPrimera(s) && s.truco.nivel === 1) s.bonoMazo = rival(eq);
+      if (!peluca && !s.envido && !s.florCantada && enPrimera(s) && s.truco.nivel === 1) s.bonoMazo = rival(eq);
       s.mazo = eq;
-      s.cierreTruco = { quien: rival(eq), motivo: "mazo", puntos: s.truco.nivel };
+      s.cierreTruco = { quien: rival(eq), motivo: peluca ? "mazo con peluca" : "mazo", puntos: peluca ? 0 : s.truco.nivel };
       terminarMano(s, ev);
       break;
     }
@@ -650,7 +694,9 @@ function vistaEnvido(s) {
     const jugadas = jugadasDe(s, e.ganadorJugador);
     mostradas = e.mostrado ? cartas : cartas.filter((id) => jugadas.includes(id));
   }
+  const pillado = e.estado === "resuelto" && e.enMesaPedido && tantoALaVista(s) && mintio(s);
   return {
+    mintio: pillado, real: pillado ? tantoDe(s.manos[e.ganadorJugador]) : null,
     estado: e.estado, cantos: e.cantos.map((x) => x.c), puntos, tantos: [...e.tantos],
     ganador: e.ganador, ganadorJugador: e.ganadorJugador, habla: e.habla, enMesaPedido: e.enMesaPedido, mostradas,
   };
@@ -684,6 +730,7 @@ export function vista(estado, jugador) {
   const s = estado;
   const yo = jugador;
   const base = {
+    poderes: { peluca: [...(s.poderes?.peluca || [])], trampa: [...(s.poderes?.trampa || [])] },
     modo: "equipos", n: s.n, yo, equipo: equipoDe(yo), meta: s.meta, flor: s.flor, puntaYHacha: s.puntaYHacha,
     nombres: [...s.nombres], puntos: [...s.puntos], mano: s.mano, numeroMano: s.numeroMano,
     tipoMano: s.tipoMano, pies: [pieDe(s, 0) ?? null, pieDe(s, 1) ?? null], fase: s.fase, listos: [...s.listos],

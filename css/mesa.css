@@ -133,3 +133,9 @@
 @keyframes habla { 50% { filter: drop-shadow(0 0 14px rgba(240,169,59,.95)) drop-shadow(0 10px 14px rgba(0,0,0,.55)); } }
 .eq-gestos { flex-wrap: wrap; max-width: calc(100vw - 96px); }
 @media (max-width: 480px) { .eq-gestos { gap: 4px; } .eq-gestos .pestana { font-size: 16.5px; padding: 5px 8px 3px; min-height: 32px; } }
+
+/* los de los costados: sobre el borde de la mesa, por encima de la madera (la cara nunca queda tapada) */
+.asiento.busto.lado { z-index: 6; }
+.asiento.busto.lado svg { filter: drop-shadow(0 14px 12px rgba(0,0,0,.6)); }
+/* las cartas de bazas anteriores quedan en la mesa, un poco más quietas */
+.tablero .carta.apagada .cara.frente { filter: brightness(.8) saturate(.85); }

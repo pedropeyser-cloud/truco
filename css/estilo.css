@@ -136,3 +136,10 @@ input[type=text]:focus { border-color: var(--ambar); outline: none; }
   .bocadillo { animation-duration: 2.3s; }
   .ic2 { animation: none; }
 }
+/* elegir el número del envido (se puede mentir) */
+.acciones .tanto-sel { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; flex: 2 1 0; max-width: 300px; }
+.acciones .tanto-sel .b.fuerte { flex: 1 1 auto; max-width: 190px; }
+.acciones .tanto-sel .b.paso { flex: 0 0 44px; min-width: 44px; text-decoration: none; font-size: 22px; color: var(--papel); border-color: var(--linea); background: var(--superficie); }
+.acciones .tanto-sel .b.paso:disabled { opacity: .35; }
+.acciones .tanto-sel .tanto-nota { flex-basis: 100%; text-align: center; font: 12px "IBM Plex Mono", monospace; color: var(--ambar); min-height: 0; }
+.acciones .tanto-sel.miente .b.fuerte { outline: 2px dashed var(--ambar); outline-offset: 2px; }

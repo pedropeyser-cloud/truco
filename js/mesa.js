@@ -1,6 +1,7 @@
 // Mesa de 4 y de 6 (2 contra 2 y 3 contra 3): sala de espera, caras con señas, bots y punta y hacha.
 // El anfitrión tiene la partida (equipos.js) y manda a cada invitado solo su vista. Los gestos (señas, cabeza,
 // preguntas del pie) no pasan por el motor: el anfitrión los reparte a todos, rivales incluidos.
+import { botonPantalla, alternarPantalla } from "./pantalla.js";
 import * as E from "./equipos.js";
 import * as BotE from "./bot-equipos.js";
 import { tantoDe, jerarquia, esFlor } from "./motor.js";
@@ -8,6 +9,9 @@ import { frente, dorso, nombreCarta, idValido } from "./cartas.js";
 import * as S from "./sonido.js";
 import { abrirSalaGrupo, entrarSala, codigoNuevo, linkMesa } from "./red.js";
 import * as K from "./caras.js";
+import { selectorTanto, liderDicho } from "./tanto.js";
+import * as Perfil from "./perfil.js";
+import * as G from "./gloria.js";
 
 const $ = (s) => document.querySelector(s);
 const RATIO = 860 / 600;
@@ -24,6 +28,9 @@ let config = { jugadores: 4, meta: 15, flor: false, puntaYHacha: false, nombre: 
 let asientos = [];              // anfitrión: [{ tipo: "yo"|"persona"|"bot", nombre, id, conectado }]
 let vista = null, elegida = null, confirmaMazo = false, capaCerradaMano = null, bandeja = null;
 let senasMano = [], ultimaPregunta = null, numeroManoSenas = -1, ultimoReparto = 0;
+let perfilesMesa = [], idsMesa = [], enClasif = false, cuentas = {}, misCuentas = {};
+const pruebas = new Map(); // anfitrión: id de conexión → { perfil que dice tener, código }
+let probado = false;        // invitado: contesta una sola prueba por mesa // perfiles por asiento (de la base), clasificatoria, cuentas de estilo
 const botTimers = new Map();
 const cartasEl = new Map();
 let carasEl = [];               // por asiento: { el, svg, parar }
@@ -46,9 +53,10 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
 export function crearMesa(cfg) {
   if (!window.Peer) return aviso("No cargó la conexión. Revisá internet y recargá.");
   config = { ...cfg }; codigo = codigoNuevo(); modo = "anfitrion"; estado = null;
-  asientos = Array.from({ length: config.jugadores }, (_, i) => (i === 0 ? { tipo: "yo", nombre: config.nombre } : null));
+  asientos = Array.from({ length: config.jugadores }, (_, i) => (i === 0 ? { tipo: "yo", nombre: config.nombre, perfil: Perfil.perfilId() } : null));
   history.replaceState(null, "", `?mesa=${codigo}&host=1`);
   guardar(); mostrarLobby(); conectarAnfitrion();
+  Perfil.linkListo(linkMesa(codigo), config.equipos ? "equipo contra equipo" : `de a ${config.jugadores}`);
 }
 
 export function practicarMesa(cfg) {
@@ -72,9 +80,10 @@ export function desdeLink(params) {
 // ================= ANFITRIÓN =================
 function reanudarAnfitrion(g) {
   config = g.config; codigo = g.codigo; estado = g.estado; asientos = g.asientos; modo = "anfitrion";
+  Perfil.linkListo(linkMesa(codigo), config.equipos ? "equipo contra equipo" : `de a ${config.jugadores}`);
   asientos.forEach((a) => { if (a?.tipo === "persona") a.conectado = false; });
   const esperarPeer = () => (window.Peer ? conectarAnfitrion() : setTimeout(esperarPeer, 100));
-  if (estado) { abrirJuego(); difundir([]); aviso("Partida recuperada. Los demás vuelven abriendo el link."); }
+  if (estado) { abrirJuego(); difundir([]); aviso("Partida recuperada. Los demás vuelven abriendo el link."); mandarPerfiles(); }
   else mostrarLobby();
   esperarPeer();
 }
@@ -82,7 +91,7 @@ function reanudarAnfitrion(g) {
 function conectarAnfitrion() {
   red = abrirSalaGrupo(codigo, config.jugadores - 1, {
     alAbrir: () => { const t = $("#txt-lobby"); if (t) t.textContent = "Mesa abierta. Mandá el link."; puntoRed(true); },
-    alEntrar: (id, m) => entra(id, String(m.nombre || "Invitado").slice(0, 16)),
+    alEntrar: (id, m) => entra(id, String(m.nombre || "Invitado").slice(0, 16), typeof m.perfil === "string" ? m.perfil.slice(0, 40) : null),
     alSalir: (id) => {
       const j = asientos.findIndex((a) => a?.id === id);
       if (j < 0) return;
@@ -100,17 +109,37 @@ function conectarAnfitrion() {
       else if (m.t === "gesto") registrarGesto(j, m.tipo, m.k);
       else if (m.t === "voz") registrarVoz(j, !!m.on);
       else if (m.t === "revancha" && estado?.fase === "fin_partida") nuevaPartidaMismaMesa();
+      else if (m.t === "probado" && pruebas.has(id)) verificarAsiento(id);
     },
   });
 }
 
-function entra(id, nombre) {
+/** El perfil de un invitado vale recién cuando prueba que es suyo (escribe en la base el código que le paso). */
+function pedirPrueba(id, perfil) {
+  const codigo = Perfil.nuevoCodigo();
+  pruebas.set(id, { perfil, codigo });
+  red?.enviar(id, { t: "prueba", codigo });
+}
+async function verificarAsiento(id) {
+  const { perfil, codigo: cod } = pruebas.get(id); pruebas.delete(id);
+  const ok = await Perfil.verificar(perfil, `${codigo}:${cod}`);
+  const j = asientos.findIndex((a) => a?.id === id);
+  if (j < 0) return;
+  if (!ok) return aviso(`No pude comprobar la cuenta de ${asientos[j].nombre}: juega sin perfil.`);
+  asientos[j].perfil = perfil; guardar(); mandarPerfiles();
+}
+
+function entra(id, nombre, perfil = null) {
   let j = asientos.findIndex((a) => a?.id === id);
-  if (j < 0 && !estado) j = asientos.findIndex((a) => a === null);
+  // equipo contra equipo: cada uno se sienta del lado de su equipo
+  const lado = perfil && config.lados ? config.lados[perfil] : undefined;
+  if (j < 0 && !estado) j = asientos.findIndex((a, k) => a === null && (lado === undefined || E.equipoDe(k) === lado));
   if (j < 0 && estado) j = asientos.findIndex((a) => a.tipo === "bot"); // con la partida empezada, toma el lugar de un bot
   if (j < 0) { red.echar(id); return; }
   const volvio = asientos[j]?.id === id;
-  asientos[j] = { tipo: "persona", nombre, id, conectado: true };
+  const yaProbado = asientos[j]?.id === id && asientos[j]?.perfil === perfil ? perfil : null; // volvió el mismo
+  asientos[j] = { tipo: "persona", nombre, id, conectado: true, perfil: yaProbado };
+  if (perfil && !yaProbado) pedirPrueba(id, perfil);
   if (estado) {
     estado.nombres[j] = nombre;
     clearTimeout(botTimers.get(j)); botTimers.delete(j);
@@ -121,6 +150,31 @@ function entra(id, nombre) {
     guardar(); renderLobby(); avisarLobby();
     aviso(`${nombre} se sentó a la mesa`);
   }
+  mandarPerfiles();
+}
+
+/** Anfitrión: manda a todos qué perfil está en cada asiento (y si es clasificatoria). */
+function mandarPerfiles() {
+  if (modo === "invitado") return;
+  idsMesa = asientos.map((a) => (a?.tipo === "yo" ? Perfil.perfilId() : a?.perfil || null));
+  enClasif = !!config.clasificatoria;
+  red?.enviarTodos({ t: "perfiles", ids: idsMesa, clasificatoria: enClasif });
+  aplicarPerfiles(idsMesa);
+}
+/**
+ * Perfiles de cada asiento (de la base): pinta del nombre, gorrita y peluca en la cara y, en el anfitrión, los
+ * objetos de cada uno para esta partida (en la clasificatoria, desde Oro 4). Una sola vez por partida.
+ */
+async function aplicarPerfiles(ids) {
+  idsMesa = ids;
+  const pf = await Perfil.perfilesDe(ids);
+  perfilesMesa = ids.map((id) => (id && pf[id]) || null);
+  if (modo !== "invitado" && estado && estado.fase !== "fin_partida" && !estado.poderesListos) {
+    const pd = Array.from({ length: estado.n }, (_, j) => G.poderesDe(perfilesMesa[j], enClasif));
+    estado = E.darPoderes(estado, { peluca: pd.map((x) => x.peluca), trampa: pd.map((x) => x.trampa) });
+    estado.poderesListos = true;
+    guardar(); difundir([]);
+  } else if (vista) render([], true);
 }
 
 function avisarLobby() {
@@ -132,14 +186,16 @@ function avisarLobby() {
 function empezarPartida() {
   asientos = asientos.map((a, i) => a || { tipo: "bot", nombre: NOMBRES_BOT[(i - 1 + NOMBRES_BOT.length) % NOMBRES_BOT.length] });
   estado = E.nuevaPartida({ jugadores: config.jugadores, meta: config.meta, flor: config.flor, puntaYHacha: config.puntaYHacha, nombres: asientos.map((a) => a.nombre) });
-  const r = E.repartir(estado); estado = r.estado;
+  const r = E.repartir(estado); estado = r.estado; cuentas = {};
   guardar(); abrirJuego(); difundir(r.eventos);
+  mandarPerfiles();
 }
 
 function nuevaPartidaMismaMesa() {
   if (modo === "invitado") return;
   estado = E.nuevaPartida({ jugadores: config.jugadores, meta: config.meta, flor: config.flor, puntaYHacha: config.puntaYHacha, nombres: asientos.map((a) => a.nombre) });
-  const r = E.repartir(estado); estado = r.estado; guardar(); cerrarCapa(); difundir(r.eventos);
+  const r = E.repartir(estado); estado = r.estado; cuentas = {}; Perfil.nuevaPartida(); guardar(); cerrarCapa(); difundir(r.eventos);
+  aplicarPerfiles(idsMesa);
 }
 
 function hostAplicar(j, accion) {
@@ -155,12 +211,25 @@ function hostAplicar(j, accion) {
 
 function difundir(eventos) {
   if (eventos.some((e) => e.t === "reparto")) { ultimoReparto = Date.now(); senasMano = Array.from({ length: estado.n }, () => []); ultimaPregunta = null; }
+  if (modo === "anfitrion") G.contarEventos(cuentas, eventos, estado);
   asientos.forEach((a, j) => {
     if (a.tipo === "yo") recibir(E.vista(estado, j), eventos);
     else if (a.tipo === "persona" && red) red.enviar(a.id, { t: "vista", vista: E.vista(estado, j), eventos });
   });
   if (eventos.some((e) => e.t === "reparto")) planificarSenasBots();
   programarBots();
+  if (modo === "anfitrion" && eventos.some((e) => e.t === "fin_partida")) anotarMesa();
+}
+
+/** Terminó la partida: la propone el anfitrión; cada invitado con perfil la confirma desde su navegador. */
+async function anotarMesa() {
+  const tipo = config.equipos ? "equipos" : config.jugadores === 4 ? "2v2" : "3v3";
+  const jugadores = asientos.map((a, j) => ({ id: a.tipo === "yo" ? Perfil.perfilId() : a.tipo === "persona" ? a.perfil || null : null, lado: E.equipoDe(j) }));
+  const puntos = [...estado.puntos], yo = asientos.findIndex((a) => a.tipo === "yo");
+  const id = await Perfil.anotar({ codigo, tipo, meta: estado.meta, puntos, ganador: estado.ganador, jugadores, equipos: config.equipos || null,
+    clasificatoria: !!config.clasificatoria, estilo: cuentas[yo] || null });
+  cuentas = {};
+  if (id) red?.enviarTodos({ t: "anotada", id, puntos });
 }
 
 // ---------------- bots ----------------
@@ -226,16 +295,20 @@ function respuestaBot(j, k) {
     case "p_mas27": return tanto > 27 ? "mas" : "menos";
     case "p_truco": return quedan.some((c) => jerarquia(c) >= 10) ? "si" : "no";
     case "p_canto": return fuerza >= 11 ? "si" : "no";
+    case "p_canto_truco": return fuerza >= 11 ? "si" : "no";
+    case "p_canto_envido": return tanto >= 27 ? "si" : "no";
+    case "p_puntita": return quedan.some((c) => jerarquia(c) >= 11) ? "si" : "no";
+    case "p_mata": case "p_pasa": return "si";
     case "p_mazo": return fuerza < 5 ? "si" : "no";
     case "p_flor": return esFlor(mano) ? "si" : "no";
-    default: return "no";
+    default: return /^p_vamos_/.test(k) ? "si" : "no";
   }
 }
 
 // ---------------- gestos ----------------
 function registrarGesto(j, tipo, k) {
   if (!estado || estado.fase !== "jugando" || estado.tipoMano !== "redonda" || estado.alMazo[j]) return;
-  const valido = (tipo === "sena" && K.senaDe(k)) || (tipo === "cabeza" && K.cabezaDe(k)) || (tipo === "pregunta" && K.preguntaDe(k) && E.pieDe(estado, E.equipoDe(j)) === j);
+  const valido = (tipo === "sena" && K.senaDe(k)) || (tipo === "cabeza" && K.cabezaDe(k)) || (tipo === "pregunta" && puedePreguntar(j, k));
   if (!valido) return;
   const g = { tipo, k, a: tipo === "cabeza" && ultimaPregunta && E.equipoDe(ultimaPregunta.de) === E.equipoDe(j) ? ultimaPregunta.k : null };
   senasMano[j]?.push(g);
@@ -251,6 +324,22 @@ function registrarGesto(j, tipo, k) {
   }
 }
 
+/** El pie pregunta todo; los demás, solo si cantan. «¡Vamos a…!» va a un compañero que sigue en la mano. */
+function puedePreguntar(j, k) {
+  const p = K.preguntaDe(k);
+  if (!p) return false;
+  if (p.quien === "todos") return true;
+  if (E.pieDe(estado, E.equipoDe(j)) !== j) return false;
+  if (p.vamos === undefined) return true;
+  return p.vamos !== j && p.vamos < estado.n && E.equipoDe(p.vamos) === E.equipoDe(j) && !estado.alMazo[p.vamos];
+}
+function textoPregunta(k) {
+  const p = K.preguntaDe(k);
+  if (!p) return "";
+  if (p.vamos === undefined) return p.texto;
+  return p.vamos === vista?.yo ? "¡Vamos a la tuya!" : `¡Vamos a ${vista?.nombres[p.vamos] || "vos"}!`;
+}
+
 function hacerGesto(tipo, k) {
   S.desbloquear();
   mostrarGesto(vista.yo, tipo, k);
@@ -263,7 +352,7 @@ function mostrarGesto(j, tipo, k) {
   if (!c) return;
   if (tipo === "sena") K.senar(c.svg, k);
   else if (tipo === "cabeza") { K.cabecear(c.svg, k); glifo(j, GLIFO[k]); }
-  else if (tipo === "pregunta") { const p = K.preguntaDe(k); if (p) bocadillo(j, p.texto, true); S.decir(k); }
+  else if (tipo === "pregunta") { const p = K.preguntaDe(k); if (p) { bocadillo(j, textoPregunta(k), true); S.decir(p.voz || k); } }
 }
 
 function glifo(j, txt) {
@@ -341,13 +430,17 @@ function entrarComoInvitado(sala) {
   modo = "invitado"; codigo = sala;
   $("#btn-entrar").disabled = true; $("#txt-invitado").textContent = "Buscando la mesa…";
   red = entrarSala(sala, {
-    alConectar: () => { red.enviar({ t: "hola", nombre, id: miId() }); $("#txt-invitado").textContent = "Sentándote…"; puntoRed(true); },
+    alConectar: () => { red.enviar({ t: "hola", nombre, id: miId(), perfil: Perfil.perfilId() }); $("#txt-invitado").textContent = "Sentándote…"; puntoRed(true); },
     alMensaje: (m) => {
       if (!m || typeof m !== "object") return;
       if (m.t === "lobby") lobbyInvitado(m);
       else if (m.t === "vista") { abrirJuego(); recibir(m.vista, Array.isArray(m.eventos) ? m.eventos : []); }
       else if (m.t === "gesto" && vista && m.jugador !== vista.yo) mostrarGesto(+m.jugador, String(m.tipo), String(m.k));
       else if (m.t === "voz" && vista) marcarVoz(+m.jugador, !!m.on);
+      else if (m.t === "anotada" && vista) Perfil.confirmar(m.id, m.puntos, vista.puntos, { clasif: enClasif, estilo: misCuentas[vista.yo] || null }).then(() => { misCuentas = {}; });
+      // la prueba se ata a ESTA mesa (la del link que abrí) y se contesta una sola vez: no se puede reenviar a otra mesa
+      else if (m.t === "prueba" && typeof m.codigo === "string" && !probado) { probado = true; Perfil.probar(`${codigo}:${m.codigo.slice(0, 24)}`).then((ok) => ok && red.enviar({ t: "probado" })); }
+      else if (m.t === "perfiles" && Array.isArray(m.ids)) { enClasif = m.clasificatoria === true; aplicarPerfiles(m.ids.slice(0, 6).map((x) => (typeof x === "string" ? x.slice(0, 40) : null))); }
       else if (m.t === "lleno") { $("#txt-invitado").textContent = "La mesa ya está completa."; red.cerrar(); }
     },
     alCortar: () => { puntoRed(false); aviso("Se cortó la conexión. Reconectando…"); },
@@ -372,7 +465,10 @@ function mostrarLobby() {
   $("#btn-compartir-mesa").hidden = !navigator.share;
   $("#btn-compartir-mesa").onclick = () => navigator.share({ title: "Truco", text: `${config.nombre || "Te"} te invita a un truco de a ${config.jugadores}`, url: linkMesa(codigo) }).catch(() => {});
   $("#btn-repartir").hidden = false;
-  $("#btn-repartir").onclick = () => { $("#bloque-lobby").hidden = true; empezarPartida(); };
+  $("#btn-repartir").onclick = () => {
+    if (config.clasificatoria && asientos.some((a) => !a)) return aviso("La clasificatoria se juega sin bots: esperá a que se sienten todos.", 4500);
+    $("#bloque-lobby").hidden = true; empezarPartida();
+  };
   renderLobby();
 }
 
@@ -388,7 +484,8 @@ function pintarAsientosLobby(lista, yo, cfg, editable = false) {
   ul.innerHTML = lista.map((a, j) => `<li data-j="${j}" class="${E.equipoDe(j) === E.equipoDe(yo) ? "nos" : "ellos"}${cambio === j ? " elegido" : ""}">
       <span class="lugar-n">${j + 1}</span><i></i><span class="quien">${a ? esc(a.nombre) + (j === yo ? " (vos)" : "") : "libre"}</span>
       <span class="tipo">${a ? (a.tipo === "bot" ? "bot" : "") : "si no llega nadie, un bot"}</span></li>`).join("");
-  $("#lobby-sala").textContent = `mesa de ${lista.length} · a ${cfg.meta || 15}${cfg.flor ? " · con flor" : ""}${cfg.puntaYHacha ? " · punta y hacha" : ""} · bots ${({ facil: "fáciles", dificil: "difíciles" })[cfg.dificultad] || "normales"}`;
+  const versus = Array.isArray(cfg.nombresEquipos) ? `${String(cfg.nombresEquipos[0]).slice(0, 24)} contra ${String(cfg.nombresEquipos[1]).slice(0, 24)} · ` : "";
+  $("#lobby-sala").textContent = versus + `mesa de ${lista.length} · a ${cfg.meta || 15}${cfg.flor ? " · con flor" : ""}${cfg.puntaYHacha ? " · punta y hacha" : ""} · bots ${({ facil: "fáciles", dificil: "difíciles" })[cfg.dificultad] || "normales"}`;
   $("#lobby-ayuda").hidden = !editable;
   if (!editable) return;
   ul.onclick = (e) => {
@@ -415,8 +512,11 @@ function abrirJuego() {
     bandeja = null; if (vista) renderGestos(vista, medidas());
   }, true);
   $("#inicio").hidden = true; $("#mesa-eq").hidden = false;
+  Perfil.jugando(true);
   $("#eq-tanteador").onclick = () => abrirCapa(hojaTanteador());
   $("#eq-menu").onclick = () => abrirCapa(hojaMenu());
+  $("#eq-mate").innerHTML = G.MATE;
+  $("#eq-mate").onclick = () => { Perfil.tomarMate(); const b = $("#eq-mate"); b.classList.add("tomando"); setTimeout(() => b.classList.remove("tomando"), 1300); aviso("Tomaste un mate: +1 de gloria al terminar la partida"); };
   $("#eq-mesa").addEventListener("click", (e) => { if (!e.target.closest(".carta") && elegida) { elegida = null; render([], false); } });
   addEventListener("resize", () => vista && render([], true));
 }
@@ -447,15 +547,19 @@ function sanear(v) {
   if (v.bazas) v.bazas = v.bazas.slice(0, 3).map((b) => ({ cartas: Array.from({ length: v.n }, (_, j) => carta(b.cartas?.[j])), gana: [0, 1, "parda"].includes(b.gana) ? b.gana : null }));
   if (v.duelos) v.duelos = v.duelos.slice(0, 3).map((d) => ({ ...d, jugadores: (d.jugadores || []).map(n), bazas: (d.bazas || []).slice(0, 3).map((b) => {
     const c = {}; for (const j of d.jugadores || []) c[n(j)] = carta(b.cartas?.[j]); return { cartas: c, gana: [0, 1, "parda"].includes(b.gana) ? b.gana : null }; }) }));
-  const TIPOS = ["jugar", "canto", "quiero", "no_quiero", "con_flor_me_achico", "tanto", "son_buenas", "son_mejores", "en_mesa", "mostrar", "mazo", "seguir"];
+  const TIPOS = ["jugar", "canto", "quiero", "no_quiero", "con_flor_me_achico", "tanto", "son_buenas", "son_mejores", "en_mesa", "mostrar", "mazo", "seguir", "mazo_peluca", "trampa"];
   v.acciones = (Array.isArray(v.acciones) ? v.acciones : []).filter((a) => a && TIPOS.includes(a.t) && (a.t !== "canto" || a.c in CANTO) && (a.t !== "jugar" || idValido(a.carta)))
-    .map((a) => (a.t === "canto" ? { t: a.t, c: a.c } : a.t === "jugar" ? { t: a.t, carta: a.carta } : { t: a.t }));
+    .map((a) => (a.t === "canto" ? { t: a.t, c: a.c } : a.t === "jugar" ? { t: a.t, carta: a.carta } : a.t === "trampa" ? { t: a.t, a: Math.min(v.n - 1, Math.max(0, n(a.a))) } : { t: a.t }));
   v.resumenMano = Array.isArray(v.resumenMano) ? v.resumenMano.map((x) => ({ quien: x.quien === 1 ? 1 : 0, motivo: String(x.motivo ?? ""), puntos: n(x.puntos), duelo: x.duelo })) : null;
   return v;
 }
 
 async function procesar(v, eventos) {
   if (modo === "invitado") v = sanear(v);
+  if (modo === "invitado") { // cada uno cuenta su estilo con sus propias cartas (mano redonda)
+    const jugadas = (v.bazas || []).map((b) => b.cartas?.[v.yo]).filter(Boolean);
+    G.contarMio(misCuentas, eventos, v.yo, [...v.miMano, ...jugadas], v.envido?.tantos);
+  }
   const prev = vista;
   if (!carasEl.length || carasEl.length !== v.n || prev?.yo !== v.yo) armarAsientos(v);
   if (eventos.some((e) => e.t === "reparto")) { cerrarCapa(); bandeja = null; await juntar(); vista = v; render(eventos, false, true); }
@@ -474,15 +578,16 @@ const CENTRO_MESA = [0.5, 0.47];
 const posAsiento = [];
 function medidas() {
   const mesa = $("#eq-mesa"), W = mesa.clientWidth, H = mesa.clientHeight, barH = $("#eq-acciones").offsetHeight;
-  const cx = W / 2, ancho = Math.min(W, 560);
-  const cw = Math.min(ancho * 0.24, 112, (H - barH) * 0.15), ch = cw * RATIO;
+  const grande = W >= 900 && H >= 640; // compu: la mesa crece con la pantalla
+  const cx = W / 2, ancho = Math.min(W, grande ? 680 : 560);
+  const cw = Math.min(ancho * 0.24, grande ? 136 : 112, (H - barH) * 0.15), ch = cw * RATIO;
   const manoY = H - barH - ch / 2 - 4;
   const top = (parseFloat(getComputedStyle($("#mesa-eq .barra")).height) || 52) + 6;
   const bottom = manoY - ch / 2 - 8;
   const RH = bottom - top;
-  const cara = Math.max(44, Math.min(W * 0.13, 64, RH * 0.13)); // tu cara-espejo
-  const tabW = Math.min(W * 0.96, 760), tabH = Math.min(RH * 0.98, tabW * 1.4);
-  const busto = Math.min(W * 0.3, 150, RH * 0.33);
+  const cara = Math.max(44, Math.min(W * 0.13, grande ? 84 : 64, RH * 0.13)); // tu cara-espejo
+  const tabW = Math.min(W * 0.96, grande ? Math.min(1180, RH * 2.3) : 760), tabH = Math.min(RH * (grande ? 0.8 : 0.98), tabW * 1.4); // en la compu el borde lejano baja: los de enfrente se ven más grandes
+  const busto = Math.min(W * 0.3, grande ? 210 : 150, RH * (grande ? 0.4 : 0.33));
   return { W, H, cx, cw, ch, manoY, top, bottom, RH, cara, tabW, tabH, busto, ancho };
 }
 const relativo = (j, v) => (j - v.yo + v.n) % v.n;
@@ -510,7 +615,7 @@ function layoutTablero(v, m) {
   }
   let n = tab.querySelector('.ancla[data-a="n"]');
   if (!n) { n = document.createElement("div"); n.className = "ancla"; n.dataset.a = "n"; tab.appendChild(n); }
-  n.style.left = (0.96 * m.tabW - 50) + "px"; n.style.top = (0.6 * m.tabH) + "px";
+  n.style.left = (0.97 * m.tabW - 50) + "px"; n.style.top = (0.93 * m.tabH) + "px"; // rincón de tu derecha, lejos de las cartas
   const c = tab.querySelector('.ancla[data-a="c"]');
   c.style.left = (CENTRO_MESA[0] * m.tabW - 50) + "px"; c.style.top = (CENTRO_MESA[1] * m.tabH) + "px";
 }
@@ -529,9 +634,19 @@ function lugarDe(j, v, m) {
 function centro(m) { try { return proyectar('.ancla[data-a="c"]'); } catch { return { x: m.cx, y: m.top + m.RH * 0.5 }; } }
 /** Dónde va la carta de cada uno sobre el tablero (coordenadas del tablero). */
 function lugarCarta(j, v, m) {
-  if (relativo(j, v) === 0) return { x: 0.42 * m.tabW, y: 0.68 * m.tabH };
-  const [u, w] = uvDe(j, v), t = v.n === 6 ? 0.5 : 0.55;
-  return { x: (u + (CENTRO_MESA[0] - u) * t) * m.tabW, y: (w + (CENTRO_MESA[1] - w) * t + 0.03) * m.tabH };
+  if (relativo(j, v) === 0) return { x: 0.36 * m.tabW, y: 0.7 * m.tabH };
+  const [u, w] = uvDe(j, v), t = v.n === 6 ? 0.42 : 0.45;
+  const x = u + (CENTRO_MESA[0] - u) * t, y = w + (CENTRO_MESA[1] - w) * t + 0.03;
+  // los del costado dejan sus cartas un poco más arriba, para que la fila no se meta en la tuya
+  return { x: x * m.tabW, y: (u === 0 || u === 1 ? y - 0.1 : y) * m.tabH };
+}
+/** Hacia dónde se corre cada carta nueva de un jugador (en anchos de carta). */
+function corrimiento(j, v) {
+  if (relativo(j, v) === 0) return { x: 0.62, y: 0 };
+  const [u] = uvDe(j, v);
+  if (u === 0) return { x: 0.06, y: 0.45 };
+  if (u === 1) return { x: -0.06, y: 0.45 };
+  return { x: -0.16, y: 0.42 }; // los de enfrente: cada carta nueva un poco más hacia el centro (no pisa al de al lado)
 }
 
 function armarAsientos(v) {
@@ -539,12 +654,14 @@ function armarAsientos(v) {
   carasEl = [];
   for (let j = 0; j < v.n; j++) {
     const el = document.createElement("div"), yo = j === v.yo, nos = E.equipoDe(j) === v.equipo;
-    el.className = "asiento " + (nos ? "nos" : "ellos") + (yo ? " yo" : " busto");
+    const lado = !yo && [0, 1].includes(uvDe(j, v)[0]);
+    el.className = "asiento " + (nos ? "nos" : "ellos") + (yo ? " yo" : " busto") + (lado ? " lado" : "");
     el.dataset.j = j;
     const cara = K.cara(j, yo ? "tu cara" : `${esc(v.nombres[j])}, ${nos ? "de tu equipo" : "rival"}`, yo ? {} : { busto: true, color: nos ? "#f0a93b" : "#5b616c" });
     el.innerHTML = yo ? cara + '<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div>'
       : '<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div><div class="quedan"></div>' + cara;
-    (yo ? $("#eq-mesa") : $("#eq-asientos")).appendChild(el);
+    // los de enfrente se sientan detrás del borde lejano; los de los costados, sobre el borde (nada les tapa la cara)
+    (yo || lado ? $("#eq-mesa") : $("#eq-asientos")).appendChild(el);
     const svg = el.querySelector("svg");
     carasEl.push({ el, svg, parar: K.parpadear(svg) });
   }
@@ -559,20 +676,23 @@ function bazaVisible(bazas) {
   return bazas[bazas.length - 2];
 }
 
+/** Todas las cartas jugadas en la mano: en el truco quedan en la mesa, cada una delante de quien la tiró. */
 function cartasEnMesa(v) {
-  const out = []; // { j, id, gana, apagada }
-  const marcar = (b, asientosB) => {
-    if (!b) return;
-    const ids = asientosB.map((j) => ({ j, id: b.cartas[j] })).filter((x) => x.id);
-    const cerrada = b.gana !== null && b.gana !== undefined;
-    const max = ids.length ? Math.max(...ids.map((x) => jerarquia(x.id))) : 0;
-    for (const x of ids) {
-      const gana = cerrada && b.gana !== "parda" && E.equipoDe(x.j) === b.gana && jerarquia(x.id) === max;
-      out.push({ ...x, gana, apagada: cerrada && b.gana !== "parda" && E.equipoDe(x.j) !== b.gana });
-    }
+  const out = []; // { j, id, gana, apagada, baza, vieja }
+  const marcar = (bazas, asientosB) => {
+    const visible = bazaVisible(bazas);
+    (bazas || []).forEach((b, i) => {
+      const ids = asientosB.map((j) => ({ j, id: b.cartas[j] })).filter((x) => x.id);
+      const cerrada = b.gana !== null && b.gana !== undefined;
+      const max = ids.length ? Math.max(...ids.map((x) => jerarquia(x.id))) : 0;
+      for (const x of ids) {
+        const gana = cerrada && b.gana !== "parda" && E.equipoDe(x.j) === b.gana && jerarquia(x.id) === max;
+        out.push({ ...x, gana, apagada: cerrada && b.gana !== "parda" && E.equipoDe(x.j) !== b.gana, baza: i, vieja: b !== visible });
+      }
+    });
   };
-  if (v.tipoMano === "punta" && v.duelos) for (const d of v.duelos) marcar(bazaVisible(d.bazas), d.jugadores);
-  else if (v.bazas) marcar(bazaVisible(v.bazas), Array.from({ length: v.n }, (_, j) => j));
+  if (v.tipoMano === "punta" && v.duelos) for (const d of v.duelos) marcar(d.bazas, d.jugadores);
+  else if (v.bazas) marcar(v.bazas, Array.from({ length: v.n }, (_, j) => j));
   return out;
 }
 
@@ -586,8 +706,10 @@ function posiciones(v, m) {
   });
   const tw = Math.min(m.tabW, m.tabH * 1.15) * (v.n === 6 ? 0.13 : 0.15); // en pantallas anchas la mesa es baja: manda el fondo
   cartasEnMesa(v).forEach((c, i) => {
-    const p = lugarCarta(c.j, v, m);
-    out.push({ key: "m-" + c.id, id: c.id, x: p.x, y: p.y, w: tw, r: giroDe(c.id) * 2, z: 1 + i, gana: c.gana, apagada: c.apagada, de: c.j, plano: true });
+    // cada baza nueva se apoya encima de la anterior, corrida hacia un costado (como en la mesa de verdad)
+    const p = lugarCarta(c.j, v, m), d = corrimiento(c.j, v, m);
+    out.push({ key: "m-" + c.id, id: c.id, x: p.x + d.x * c.baza * tw, y: p.y + d.y * c.baza * tw, w: tw, r: giroDe(c.id) * 1.5, z: 1 + c.baza * 10 + i,
+      gana: c.gana && !c.vieja, apagada: c.apagada || c.vieja, de: c.j, plano: true });
   });
   return out;
 }
@@ -674,7 +796,7 @@ function render(eventos, sinAnim, reparto) {
     });
   });
 
-  renderEstado(v, m); renderNota(v); ubicarNota(m); renderAcciones(v); renderGestos(v, m); renderTanteador(v);
+  renderEstado(v, m); renderNota(v); ubicarNota(m); renderAcciones(v); renderGestos(v, m); renderTanteador(v); renderMate(v);
   clearTimeout(render.fin);
   if (v.fase === "fin_mano" || v.fase === "fin_partida") {
     const recien = eventos.some((e) => e.t === "fin_mano" || e.t === "fin_partida");
@@ -699,23 +821,30 @@ function renderAsientos(v, m) {
       c.el.style.left = p.x + "px"; c.el.style.top = p.y + "px";
     } else {
       // el busto se sienta detrás del borde de la mesa: la madera le tapa los hombros
-      const a = proyectar(`.ancla[data-a="${j}"]`), [u, w] = uvDe(j, v);
-      const k = w === 0 ? 0.2 : 0.3; // cuánto del busto tapa la mesa
-      let ancho = m.busto * Math.max(0.62, Math.min(1.1, a.s));
+      const a = proyectar(`.ancla[data-a="${j}"]`), [u] = uvDe(j, v), lado = u === 0 || u === 1;
+      // enfrente: la madera tapa el pecho; al costado: los hombros quedan apoyados sobre el borde
+      const k = lado ? 0.34 : 0.2;
+      let ancho = m.busto * Math.max(lado ? 0.62 : 0.8, Math.min(1.1, a.s)) * (lado ? 0.92 : 1);
       const altoMax = (a.y - m.top - 38) / (1 - k);   // el nombre no puede subirse a la barra
-      ancho = Math.max(48, Math.min(ancho, altoMax / 1.5));
+      ancho = Math.max(52, Math.min(ancho, altoMax / 1.5));
       const alto = ancho * 1.5;
-      const x = Math.min(m.W - ancho * 0.5 - 2, Math.max(ancho * 0.5 + 2, a.x + (u === 0 ? -ancho * 0.18 : u === 1 ? ancho * 0.18 : 0)));
+      const corre = lado ? (u === 0 ? -1 : 1) * ancho * 0.3 : 0; // hacia afuera, para que la cara quede al borde
+      const x = Math.min(m.W - ancho * 0.5 - 2, Math.max(ancho * 0.5 + 2, a.x + corre));
       const pie = a.y + alto * k;
       c.svg.style.width = ancho + "px";
       c.el.style.left = x + "px"; c.el.style.top = pie + "px";
       posAsiento[j] = { x, y: pie - alto * 0.62, top: pie - alto - 30, h: alto };
     }
-    c.el.querySelector(".n").textContent = j === v.yo ? "vos" : nombre;
+    const pj = perfilesMesa[j];
+    if (pj && j !== v.yo) c.el.querySelector(".n").innerHTML = Perfil.nombreHTML(pj, { titulo: true }); else c.el.querySelector(".n").textContent = j === v.yo ? "vos" : nombre;
+    const acc = G.accesoriosDe(pj, enClasif), clave = JSON.stringify(acc);
+    if (c.acc !== clave) { c.acc = clave; K.accesorios(c.svg, acc, { gorra: G.gorra, peluca: G.peluca }); }
     const chips = [];
     if (v.mano === j && v.fase === "jugando") chips.push("mano");
     if (v.tipoMano === "redonda" && v.pies?.includes(j) && v.fase === "jugando") chips.push("pie");
     if (v.alMazo[j]) chips.push("al mazo");
+    if (v.poderes?.peluca?.[j] > 0) chips.push("peluca");
+    if (v.poderes?.trampa?.[j] > 0) chips.push("trampa");
     if (turnoDuelo && v.miDuelo?.contra === j) chips.push("tu duelo");
     c.el.querySelector(".chips").innerHTML = chips.map((t) => `<span class="mini-chip">${t}</span>`).join("");
     const q = c.el.querySelector(".quedan"); if (q) q.innerHTML = "<span></span>".repeat(v.alMazo[j] ? 0 : v.cartasEnMano[j]);
@@ -765,6 +894,7 @@ function renderNota(v) {
     const dv = v.miDuelo.vista, l = v.miDuelo.local;
     dv.bazas.forEach((b, i) => { if (b.gana != null) lineas.push(`${i + 1}ª ${b.gana === "parda" ? "parda" : b.gana === l ? "vos" : v.nombres[v.miDuelo.contra]}`); });
     if (dv.truco?.nivel > 1) lineas.push(["", "", "truco", "retruco", "vale cuatro"][dv.truco.nivel] + " querido");
+    if (dv.envido?.mintio) lineas.push(`¡mintió! tenía ${+dv.envido.real}`);
     if (dv.envido?.ganador != null && dv.envido.puntos != null) lineas.push(`envido: ${dv.envido.ganador === l ? "vos" : v.nombres[v.miDuelo.contra]} +${dv.envido.puntos}`);
   } else {
     if (v.truco?.nivel > 1) lineas.push(["", "", "truco", "retruco", "vale cuatro"][v.truco.nivel] + " querido");
@@ -774,6 +904,7 @@ function renderNota(v) {
       if (dichos.length) lineas.push(dichos.join(" · "));
       if (e.puntos != null && e.ganador != null && e.estado !== "querido") lineas.push(`envido: ${nombreEquipo(e.ganador)} +${e.puntos}`);
       if (e.enMesaPedido) lineas.push(e.mostradas?.length ? `mostró: ${e.mostradas.map(nombreCarta).join(", ")}` : "pidieron las cartas en mesa");
+      if (e.mintio) lineas.push(`¡${e.ganadorJugador === v.yo ? "mentiste" : "mintió"}! tenía ${+e.real}`);
     }
     if (v.florCantada?.estado === "resuelta") lineas.push(`flor: ${nombreEquipo(v.florCantada.ganador)} +${v.florCantada.puntos}`);
   }
@@ -803,10 +934,15 @@ function renderAcciones(v) {
   }
   const resp = acc.filter((a) => ["quiero", "no_quiero", "con_flor_me_achico", "son_buenas", "son_mejores", "tanto", "mostrar", "seguir"].includes(a.t));
   const cantos = acc.filter((a) => a.t === "canto");
-  const chicas = acc.filter((a) => a.t === "en_mesa" || a.t === "mazo");
+  const chicas = acc.filter((a) => ["en_mesa", "mazo", "mazo_peluca", "trampa"].includes(a.t));
   if (resp.length) {
     const f = fila(), t = miTanto(v);
     for (const a of resp) {
+      if (a.t === "tanto" || a.t === "son_mejores") {
+        const min = a.t === "son_mejores" ? liderDicho(v.tipoMano === "punta" && v.miDuelo ? v.miDuelo.vista.envido : v.envido) + 1 : 0;
+        if (min <= 33) selectorTanto(f, { real: t, min, tipo: a.t, enviar: enviarAccion, alTocar: () => S.desbloquear() });
+        continue;
+      }
       const txt = { quiero: "Quiero", no_quiero: "No quiero", con_flor_me_achico: "Con flor me achico", son_buenas: "Son buenas", son_mejores: `¡${t ?? ""} son mejores!`, tanto: `Tengo ${t ?? ""}`, mostrar: "Mostrar las cartas", seguir: "Siguiente mano" }[a.t];
       boton(f, txt, ["quiero", "tanto", "son_mejores", "mostrar", "seguir"].includes(a.t) ? "fuerte" : "", () => enviarAccion(a));
     }
@@ -819,6 +955,8 @@ function renderAcciones(v) {
     const f = fila();
     for (const a of chicas) {
       if (a.t === "en_mesa") boton(f, "Las quiero en mesa", "chico alerta", () => enviarAccion(a));
+      else if (a.t === "mazo_peluca") boton(f, "Mazo con peluca", "chico poder", () => enviarAccion(a));
+      else if (a.t === "trampa") boton(f, `Trampa a ${v.nombres[a.a]}`, "chico poder", () => enviarAccion(a));
       else {
         const b = boton(f, "Irme al mazo", "chico", () => {
           if (!confirmaMazo) { confirmaMazo = true; b.textContent = "¿Seguro? Tocá de nuevo"; b.classList.add("alerta"); setTimeout(() => { confirmaMazo = false; if (b.isConnected) { b.textContent = "Irme al mazo"; b.classList.remove("alerta"); } }, 2500); }
@@ -840,9 +978,8 @@ function renderGestos(v, m) {
   const p = lugarDe(v.yo, v, m);
   cont.style.left = (p.x + m.cara * 0.62) + "px";
   cont.style.top = (p.y - 18) + "px";
-  const pestañas = [["sena", "señas"], ["cabeza", "cabeza"], ...(soyPie ? [["pregunta", "preguntar"]] : [])];
+  const pestañas = [["sena", "señas"], ["cabeza", "cabeza"], ["pregunta", soyPie ? "preguntar" : "¿canto?"]];
   const conMic = soyPie && modo !== "practica" && !!navigator.mediaDevices?.getUserMedia;
-  if (bandeja === "pregunta" && !soyPie) bandeja = null;
   cont.innerHTML = pestañas.map(([k, t]) => `<button class="pestana" data-g="${k}" aria-pressed="${bandeja === k}">${t}</button>`).join("")
     + (conMic ? `<button class="pestana mic" data-mic aria-pressed="${hablando}" title="Mantené apretado para hablarle a la mesa">${hablando ? "hablando…" : "hablar"}</button>` : "");
   const mic = cont.querySelector("[data-mic]");
@@ -857,8 +994,13 @@ function renderGestos(v, m) {
   let botones = [];
   if (bandeja === "sena") botones = K.SENAS.filter((s) => s.k !== "flor" || v.flor).map((s) => [s.k, s.carta, s.nombre]);
   if (bandeja === "cabeza") botones = K.CABEZA.map((c) => [c.k, c.nombre, c.gesto]);
-  if (bandeja === "pregunta") botones = K.PREGUNTAS.filter((q) => !q.soloFlor || v.flor).map((q) => [q.k, q.texto, ""]);
-  band.innerHTML = `<p class="ayuda">${{ sena: "Tu cara la hace un instante. La ven todos.", cabeza: "Contestale a tu compañero con la cabeza.", pregunta: "Sos el pie: preguntale a tu equipo." }[bandeja]}</p>`
+  if (bandeja === "pregunta") {
+    botones = K.PREGUNTAS.filter((q) => (!q.soloFlor || v.flor) && (soyPie || q.quien === "todos")).map((q) => [q.k, q.texto, ""]);
+    if (soyPie) v.nombres.forEach((n, j) => { // «¡Vamos a…!»: a la carta de cada compañero que sigue en la mano
+      if (j !== v.yo && E.equipoDe(j) === v.equipo && !v.alMazo[j]) botones.splice(5, 0, [`p_vamos_${j}`, `¡Vamos a ${n}!`, "en esta baza vamos a su carta"]);
+    });
+  }
+  band.innerHTML = `<p class="ayuda">${{ sena: "Tu cara la hace un instante. La ven todos.", cabeza: "Contestale a tu compañero con la cabeza.", pregunta: soyPie ? "Sos el pie: hablale a tu equipo. Lo oyen todos (también sirve para mentir)." : "Preguntale a tu pie si cantás. Lo oyen todos." }[bandeja]}</p>`
     + `<div class="botones">${botones.map(([k, t, sub]) => `<button class="b" data-k="${k}" title="${esc(sub)}">${esc(t)}</button>`).join("")}</div>`;
   band.onclick = (e) => { const b = e.target.closest("[data-k]"); if (!b) return; hacerGesto(bandeja, b.dataset.k); bandeja = null; renderGestos(vista, medidas()); };
 }
@@ -877,6 +1019,8 @@ function cantar(eventos, prev) {
   for (const e of eventos) {
     if (e.t === "fin_partida") { const k = e.ganador === vista.equipo ? "gane" : "perdi"; setTimeout(() => S.decir(k), t + 1200); continue; }
     if (e.t === "reparto" && e.tipo === "punta") { setTimeout(() => anuncio("¡Punta y hacha!"), 700); continue; }
+    if (e.t === "trampa") { setTimeout(() => { bocadillo(e.jugador, "¡Trampa!"); if (e.a === vista.yo) aviso("Te hicieron la trampa: te cambiaron una carta de la mano"); }, t); t += 1150; continue; }
+    if (e.t === "mazo" && e.peluca) { setTimeout(() => { S.decir("mazo"); bocadillo(e.jugador, "Me voy… con peluca"); }, t); t += 1150; continue; }
     const k = claveVoz(e, prev); if (!k) continue;
     const dichos = [];
     if (e.t === "canto" && ENVIDOS.includes(e.c) && TRUCOS.includes(prev?.cantoPendiente?.c)) dichos.push("envido_primero");
@@ -933,6 +1077,9 @@ function servilleta(v, s) {
   const col = (eq) => `<div class="col"><span class="quien">${nombreEquipo(eq)}</span><span class="num">${v.puntos[eq]}${v.meta === 30 ? (v.puntos[eq] >= 15 ? " · buenas" : " · malas") : ""}</span>${fosforos(v.puntos[eq], v.meta, s)}</div>`;
   return `<div class="cols">${col(v.equipo)}${col(1 - v.equipo)}</div>`;
 }
+function renderMate(v) {
+  $("#eq-mate").hidden = !(modo !== "practica" && Perfil.mateDisponible(enClasif) && v.fase !== "fin_partida");
+}
 function renderTanteador(v) {
   $("#eq-tanteador").innerHTML = `<svg viewBox="0 0 14 22" aria-hidden="true"><line x1="7" y1="20" x2="7" y2="5" stroke="#3b3024" stroke-width="2" stroke-linecap="round"/><circle cx="7" cy="4.5" r="3" fill="#b8621b"/></svg><span>nos <b>${v.puntos[v.equipo]}</b> · <b>${v.puntos[1 - v.equipo]}</b></span>`;
   $("#eq-titulo").textContent = `${v.n === 6 ? "3 contra 3" : "2 contra 2"} · a ${v.meta}`;
@@ -965,12 +1112,14 @@ function hojaMenu() {
   return `<div class="hoja"><h2>Menú</h2><p class="sala">${modo === "practica" ? "práctica con bots" : "mesa por link"} · ${vista.n === 6 ? "3 contra 3" : "2 contra 2"} · a ${vista.meta}${vista.flor ? " · con flor" : ""}${vista.puntaYHacha ? " · punta y hacha" : ""}</p>
     <button class="b claro" data-sonido>${S.estaActivo() ? "Silenciar las voces" : "Prender las voces"}</button>${link}
     ${ausentes ? '<button class="b claro" data-bots>Poner bots en lugar de los que se fueron</button>' : ""}
-    <button class="b claro" data-reglas>Reglas en equipo</button><button class="b claro" data-salir>Salir de la mesa</button><button class="b" data-cerrar>Volver</button></div>`;
+    ${botonPantalla()}<button class="b claro" data-reglas>Reglas en equipo</button><button class="b claro" data-salir>Salir de la mesa</button><button class="b" data-cerrar>Volver</button></div>`;
 }
 function hojaReglas() {
   return `<div class="hoja"><h2>Reglas en equipo</h2>
   <p><b>Equipos:</b> se sientan alternados. Se juega en orden desde la mano. La baza la gana el equipo de la carta más alta.</p>
-  <p><b>El pie habla:</b> los cantos del otro equipo los contesta el pie (el último de tu equipo en jugar). Puede preguntarles a los compañeros; ellos contestan solo con la cabeza.</p>
+  <p><b>El pie habla:</b> los cantos del otro equipo los contesta el pie (el último de tu equipo en jugar). Puede preguntar (¿tenés para el envido?, ¿una puntita?) y decir «¡vamos a…!» la carta de un compañero; ellos contestan solo con la cabeza.</p>
+  <p><b>Los demás</b> cantan envido o truco en su turno, y pueden preguntarle al pie «¿canto?». Todo lo que se dice lo oye la mesa entera: se puede mentir.</p>
+  <p><b>Envido:</b> podés decir cualquier número. Si te piden las cartas en mesa y no lo tenías, los puntos son para ellos.</p>
   <p><b>Señas:</b> duran un instante y las ven todos, rivales incluidos. 1 de espada: cejas · 1 de basto: guiño · 7 de espada: boca a la derecha · 7 de oro: boca a la izquierda · tres: muerde el labio · dos: trompita · ancho falso: lengua · flor: cachetes · nada: ojos cerrados.</p>
   <p><b>Al mazo</b> se va cada uno: tus compañeros pueden seguir sin vos. Si se van todos, el equipo pierde la mano.</p>
   <p><b>Punta y hacha:</b> si está prendida, entre 5 y 25 (a 30) se alterna una mano normal con una de duelos: cada uno contra el suyo, y lo que gana suma para el equipo.</p>
@@ -985,6 +1134,7 @@ function abrirCapa(html) {
     if (t.closest("[data-accion]")) { const a = t.closest("[data-accion]").dataset.accion; if (a === "seguir") cerrarCapa(); enviarAccion({ t: a }); }
     if (t.closest("[data-otra]")) nuevaPartidaMismaMesa();
     if (t.closest("[data-revancha]")) { red.enviar({ t: "revancha" }); aviso("Le avisé al que armó la mesa"); }
+    if (t.closest("[data-pantalla]")) { alternarPantalla(); setTimeout(() => abrirCapa(hojaMenu()), 300); }
     if (t.closest("[data-sonido]")) { S.setActivo(!S.estaActivo()); abrirCapa(hojaMenu()); }
     if (t.closest("[data-copiar]")) copiarLink();
     if (t.closest("[data-reglas]")) abrirCapa(hojaReglas());

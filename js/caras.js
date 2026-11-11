@@ -18,18 +18,29 @@ export const CABEZA = [
   { k: "si", nombre: "Sí", gesto: "asiente" },
   { k: "no", nombre: "No", gesto: "niega" },
 ];
-// Lo que puede preguntar el pie (con voz en la tanda 3; por ahora, bocadillo).
+// Lo que se dice en voz alta a la mesa (lo oyen todos, rivales incluidos: sirve también para mentir).
+// pie: solo el pie; todos: cualquiera de la mesa. «¡Vamos a…!» se arma por compañero (p_vamos_<asiento>).
 export const PREGUNTAS = [
-  { k: "p_envido", texto: "¿Tenés para el envido?" },
-  { k: "p_mas27", texto: "¿Más de veintisiete?" },
-  { k: "p_truco", texto: "¿Tenés algo para el truco?" },
-  { k: "p_canto", texto: "¿Canto?" },
-  { k: "p_mazo", texto: "¿Nos vamos al mazo?" },
-  { k: "p_flor", texto: "¿Tenés flor?", soloFlor: true },
+  { k: "p_envido", texto: "¿Tenés para el envido?", quien: "pie" },
+  { k: "p_mas27", texto: "¿Más de veintisiete?", quien: "pie" },
+  { k: "p_puntita", texto: "¿Tenés una puntita?", quien: "pie" },
+  { k: "p_truco", texto: "¿Tenés algo para el truco?", quien: "pie" },
+  { k: "p_mata", texto: "Matala si podés.", quien: "pie" },
+  { k: "p_pasa", texto: "Pasá, que voy yo.", quien: "pie" },
+  { k: "p_canto", texto: "¿Canto?", quien: "todos" },
+  { k: "p_canto_envido", texto: "¿Canto envido?", quien: "todos" },
+  { k: "p_canto_truco", texto: "¿Canto truco?", quien: "todos" },
+  { k: "p_mazo", texto: "¿Nos vamos al mazo?", quien: "pie" },
+  { k: "p_flor", texto: "¿Tenés flor?", quien: "pie", soloFlor: true },
 ];
 export const senaDe = (k) => SENAS.find((s) => s.k === k);
 export const cabezaDe = (k) => CABEZA.find((c) => c.k === k);
-export const preguntaDe = (k) => PREGUNTAS.find((p) => p.k === k);
+/** La pregunta de clave k (incluida «¡Vamos a…!», p_vamos_<asiento>, que dice el pie). */
+export function preguntaDe(k) {
+  const v = /^p_vamos_([0-5])$/.exec(String(k));
+  if (v) return { k, texto: "¡Vamos a la tuya!", quien: "pie", vamos: +v[1], voz: "p_vamos" };
+  return PREGUNTAS.find((p) => p.k === k);
+}
 
 /** Seña que corresponde a una carta (o null si la carta no tiene seña). */
 export function senaDeCarta(id) {
@@ -134,4 +145,17 @@ export function parpadear(svg) {
   };
   uno();
   return () => clearTimeout(t);
+}
+
+/**
+ * Accesorios de la gloria sobre una cara: gorrita (encima de la cabeza, no tapa cejas ni ojos) y peluca de color
+ * (detrás de la cabeza: asoma arriba y a los costados). Se mueven con la cabeza al asentir o negar.
+ * acc: { gorra: bool, peluca: "#rrggbb" | null }. El dibujo lo da gloria.js.
+ */
+export function accesorios(svg, acc, { gorra, peluca }) {
+  const cab = svg?.querySelector(".cabeza");
+  if (!cab) return;
+  cab.querySelectorAll(".acc").forEach((x) => x.remove());
+  if (acc?.peluca) cab.insertAdjacentHTML("afterbegin", peluca(acc.peluca));
+  if (acc?.gorra) cab.insertAdjacentHTML("beforeend", gorra());
 }

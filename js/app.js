@@ -1,11 +1,15 @@
 // Pantalla del truco: inicio, mesa, animaciones (riffle, reparto, dar vuelta, abanico), cantos con voz y tanteador de fósforos.
 // Modos: "anfitrion" (tiene la partida y la comparte por link), "invitado" (manda acciones, recibe vistas), "practica" (contra bot.js).
+import { botonPantalla, alternarPantalla } from "./pantalla.js";
+import { selectorTanto, liderDicho } from "./tanto.js";
 import * as M from "./motor.js";
 import * as Bot from "./bot.js";
 import { frente, dorso, nombreCarta, idValido } from "./cartas.js";
 import * as S from "./sonido.js";
 import { abrirSala, entrarSala, codigoNuevo, linkDe } from "./red.js";
 import * as Mesa from "./mesa.js"; // mesas de 4 y 6 (2 contra 2, 3 contra 3)
+import * as Perfil from "./perfil.js"; // cuenta con Google, historial, conectados (tanda 4B)
+import * as G from "./gloria.js";     // lo que se desbloquea con la gloria (4C) y la clasificatoria (4D)
 import { azarDe } from "./bot-equipos.js";
 
 const $ = s => document.querySelector(s);
@@ -18,6 +22,8 @@ const DICHO = { envido: "¡Envido!", envido_envido: "¡Envido, envido!", real_en
 const ENVIDOS = ["envido", "real_envido", "falta_envido"], TRUCOS = ["truco", "retruco", "vale_cuatro"];
 
 let modo = null, estado = null, red = null, codigo = null, config = { meta: 15, flor: false, nombre: "" };
+let rivalPerfil = null; // perfil del rival en el 1 contra 1 (para el cara a cara y anotar la partida)
+let perfiles1v1 = [null, null], enClasif = false, cuentas = {}, misCuentas = {}, prueba = null, probado = false; // probado: el invitado contesta una sola prueba por mesa // perfiles por asiento (de la base), clasificatoria, cuentas de estilo
 let vista = null, elegida = null, botTimer = null, finTimer = null, ultimoReparto = 0, confirmaMazo = false, capaCerradaMano = null;
 const cartasEl = new Map();
 
@@ -58,11 +64,14 @@ function iniciar() {
     $("#bloque-crear").hidden = true; $("#bloque-invitado").hidden = false;
     $("#btn-entrar").onclick = () => entrarComoInvitado(sala);
   }
-  $("#btn-crear").onclick = crearSala;
+  $("#btn-crear").onclick = () => crearSala();
+  $("#btn-mate").innerHTML = G.MATE;
+  $("#btn-mate").onclick = () => { Perfil.tomarMate(); const b = $("#btn-mate"); b.classList.add("tomando"); setTimeout(() => b.classList.remove("tomando"), 1300); aviso("Tomaste un mate: +1 de gloria al terminar la partida"); };
   $("#btn-practica").onclick = empezarPractica;
   $("#btn-copiar").onclick = copiarLink;
   $("#btn-compartir").onclick = compartirLink;
   addEventListener("resize", () => vista && render([], true));
+  Perfil.iniciar({ aviso, crearMesaEquipos: extra => Mesa.crearMesa({ ...leerForm(), ...extra }), crearSalaClasif: extra => crearSala(extra) });
 }
 function leerForm() {
   const nombre = ($("#in-nombre").value.trim() || "Yo").slice(0, 16); guardarNombre(nombre);
@@ -73,16 +82,20 @@ function leerForm() {
 function jugadoresElegidos() { return +(document.querySelector("[data-jug][aria-pressed=true]")?.dataset.jug || 2); }
 
 // ================= ANFITRIÓN =================
-function crearSala() {
+function crearSala(extra = {}) {
   if (!window.Peer) return aviso("No cargó la conexión. Revisá internet y recargá.");
-  config = leerForm();
+  config = { ...leerForm(), ...extra };
+  if (config.clasificatoria) config.jugadores = 2; // la clasificatoria de a 1 es mano a mano
+  enClasif = !!config.clasificatoria;
   if (config.jugadores > 2) return Mesa.crearMesa(config);
   codigo = codigoNuevo(); estado = null; modo = "anfitrion";
   history.replaceState(null, "", `?sala=${codigo}&host=1`);
   guardar(); mostrarEspera(); conectarAnfitrion();
+  Perfil.linkListo(linkDe(codigo), "mano a mano");
 }
 function reanudarAnfitrion(g) {
-  config = g.config; codigo = g.codigo; estado = g.estado; modo = "anfitrion";
+  config = g.config; codigo = g.codigo; estado = g.estado; modo = "anfitrion"; rivalPerfil = g.config.perfiles?.[1] || null; enClasif = !!g.config.clasificatoria;
+  Perfil.linkListo(linkDe(codigo), "mano a mano");
   const esperarPeer = () => window.Peer ? conectarAnfitrion() : setTimeout(esperarPeer, 100);
   if (estado) { abrirJuego(); recibir(M.vista(estado, 0), []); aviso("Partida recuperada. Esperando que vuelva tu rival…"); }
   else mostrarEspera();
@@ -111,6 +124,20 @@ function conectarAnfitrion() {
           aviso(`${nombre} se sentó a la mesa`);
         } else { abrirJuego(); red.enviar({ t: "vista", vista: M.vista(estado, 1), eventos: [] }); aviso(`${nombre} volvió`); }
         puntoRed(true);
+        // el perfil del invitado vale recién cuando prueba que es suyo (escribe en la base el código que le paso)
+        const dice = typeof m.perfil === "string" ? m.perfil.slice(0, 40) : null;
+        if (dice && dice !== rivalPerfil) { prueba = { perfil: dice, codigo: Perfil.nuevoCodigo() }; red.enviar({ t: "prueba", codigo: prueba.codigo }); }
+        if (!rivalPerfil) { config.perfiles = [Perfil.perfilId(), null]; guardar(); }
+        red.enviar({ t: "perfiles", ids: config.perfiles || [Perfil.perfilId(), null], clasificatoria: enClasif });
+        caraACara(); if (!prueba) aplicarPerfiles(config.perfiles || [Perfil.perfilId(), null]); // con prueba pendiente, los objetos esperan
+      } else if (m.t === "probado" && prueba) {
+        const { perfil, codigo: cod } = prueba; prueba = null;
+        Perfil.verificar(perfil, `${codigo}:${cod}`).then(ok => {
+          if (!ok) { aplicarPerfiles([Perfil.perfilId(), null]); return aviso("No pude comprobar la cuenta de tu rival: juega sin perfil."); }
+          rivalPerfil = perfil; config.perfiles = [Perfil.perfilId(), rivalPerfil]; guardar();
+          red.enviar({ t: "perfiles", ids: config.perfiles, clasificatoria: enClasif });
+          caraACara(); aplicarPerfiles(config.perfiles);
+        });
       } else if (m.t === "accion") hostAplicar(1, m.accion);
       else if (m.t === "revancha" && vista?.fase === "fin_partida") nuevaPartidaMismaMesa();
     }
@@ -122,15 +149,51 @@ function hostAplicar(j, accion) {
   catch (e) { console.warn("acción rechazada", j, accion, e.message); if (j === 1 && modo === "anfitrion") red.enviar({ t: "vista", vista: M.vista(estado, 1), eventos: [] }); return; }
   estado = r.estado; guardar(); difundir(r.eventos);
 }
+/**
+ * Perfiles de los dos asientos (de la base, no de lo que dice cada navegador): pinta del nombre y, en el anfitrión,
+ * los objetos de cada uno para esta partida (peluca, trampa; en la clasificatoria, desde Oro 4).
+ */
+async function aplicarPerfiles(ids) {
+  const pf = await Perfil.perfilesDe(ids);
+  perfiles1v1 = [pf[ids[0]] || null, pf[ids[1]] || null];
+  // una sola vez por partida (si el invitado se reconecta, no se le devuelven los usos)
+  if ((modo === "anfitrion" || modo === "practica") && estado && estado.fase !== "fin_partida" && !estado.poderesListos) {
+    const pd = perfiles1v1.map(x => G.poderesDe(x, enClasif));
+    estado = M.darPoderes(estado, { peluca: pd.map(x => x.peluca), trampa: pd.map(x => x.trampa) });
+    estado.poderesListos = true;
+    guardar(); difundir([]);
+  } else if (vista) render([], true);
+}
 function difundir(eventos) {
   if (eventos.some(e => e.t === "reparto")) ultimoReparto = Date.now();
+  if (modo === "anfitrion") G.contarEventos(cuentas, eventos, estado);
   recibir(M.vista(estado, 0), eventos);
   if (modo === "anfitrion") red?.enviar({ t: "vista", vista: M.vista(estado, 1), eventos });
   if (modo === "practica") programarBot();
+  if (modo === "anfitrion" && eventos.some(e => e.t === "fin_partida")) anotarPartida();
+}
+/** Terminó la partida: el anfitrión la propone y el invitado la confirma desde su navegador. */
+async function anotarPartida() {
+  const id = await Perfil.anotar({ codigo, tipo: "1v1", meta: estado.meta, puntos: [...estado.puntos], ganador: estado.ganador, clasificatoria: enClasif,
+    estilo: cuentas[0] || null, jugadores: [{ id: Perfil.perfilId(), lado: 0 }, { id: rivalPerfil, lado: 1 }] });
+  cuentas = {};
+  if (!id) return;
+  red?.enviar({ t: "anotada", id, puntos: [...estado.puntos] });
+  setTimeout(caraACara, 4000);
+}
+/** «Fulano 4 a 1» en la barra: verde si vas ganando, rojo si vas perdiendo. */
+async function caraACara() {
+  const el = $("#cara-a-cara");
+  if (!rivalPerfil || !Perfil.perfilId() || !vista) { el.hidden = true; return; }
+  const r = await Perfil.caraACara(rivalPerfil, nombreRival());
+  if (!r) return;
+  el.textContent = r.texto; el.title = r.titulo || ""; el.className = "cara-a-cara " + r.clase; el.hidden = false;
 }
 function nuevaPartidaMismaMesa() {
   const nombres = vista.nombres.slice();
   estado = M.nuevaPartida({ meta: config.meta, flor: config.flor, nombres });
+  cuentas = {}; Perfil.nuevaPartida();
+  if (perfiles1v1.some(Boolean)) { const pd = perfiles1v1.map(x => G.poderesDe(x, enClasif)); estado = M.darPoderes(estado, { peluca: pd.map(x => x.peluca), trampa: pd.map(x => x.trampa) }); estado.poderesListos = true; }
   const r = M.repartir(estado); estado = r.estado; guardar(); cerrarCapa(); difundir(r.eventos);
 }
 async function copiarLink() {
@@ -149,9 +212,15 @@ function entrarComoInvitado(sala) {
   $("#btn-entrar").disabled = true; $("#txt-invitado").textContent = "Buscando la mesa…";
   let conectadoAlguna = false;
   red = entrarSala(sala, {
-    alConectar: () => { conectadoAlguna = true; red.enviar({ t: "hola", nombre }); $("#txt-invitado").textContent = "Sentándote…"; puntoRed(true); },
+    alConectar: () => { conectadoAlguna = true; red.enviar({ t: "hola", nombre, perfil: Perfil.perfilId() }); $("#txt-invitado").textContent = "Sentándote…"; puntoRed(true); },
     alMensaje: m => {
       if (m.t === "vista") { abrirJuego(); recibir(m.vista, m.eventos || []); }
+      else if (m.t === "prueba" && typeof m.codigo === "string" && !probado) { probado = true; Perfil.probar(`${codigo}:${m.codigo.slice(0, 24)}`).then(ok => ok && red.enviar({ t: "probado" })); }
+      else if (m.t === "perfiles") {
+        rivalPerfil = typeof m.ids?.[0] === "string" ? m.ids[0].slice(0, 40) : null; enClasif = m.clasificatoria === true;
+        setTimeout(caraACara, 600); aplicarPerfiles([rivalPerfil, Perfil.perfilId()]);
+      }
+      else if (m.t === "anotada" && vista) Perfil.confirmar(m.id, m.puntos, vista.puntos, { clasif: enClasif, estilo: misCuentas[vista.yo] || null }).then(() => { misCuentas = {}; setTimeout(caraACara, 2000); });
       else if (m.t === "lleno") { $("#txt-invitado").textContent = "La mesa ya está completa."; red.cerrar(); }
     },
     alCortar: () => { puntoRed(false); aviso("Se cortó la conexión. Reconectando…"); },
@@ -171,6 +240,7 @@ function empezarPractica() {
   modo = "practica";
   estado = M.nuevaPartida({ meta: config.meta, flor: config.flor, nombres: [config.nombre, "El Barajador"] });
   const r = M.repartir(estado); estado = r.estado; abrirJuego(); difundir(r.eventos);
+  if (Perfil.perfilId()) aplicarPerfiles([Perfil.perfilId(), null]);
 }
 function programarBot() {
   clearTimeout(botTimer);
@@ -187,6 +257,7 @@ function programarBot() {
 function abrirJuego() {
   if (!$("#juego").hidden) return;
   $("#inicio").hidden = true; $("#juego").hidden = false;
+  Perfil.jugando(true);
   $("#btn-tanteador").onclick = () => abrirCapa(hojaTanteador());
   $("#btn-menu").onclick = () => abrirCapa(hojaMenu());
   $("#mesa").addEventListener("click", e => { if (!e.target.closest(".carta") && elegida) { elegida = null; render([], false); } });
@@ -216,7 +287,7 @@ function sanear(v) {
     v.envido.tantos = [0, 1].map(j => v.envido.tantos?.[j] == null ? null : n(v.envido.tantos[j])); }
   if (v.truco) v.truco.nivel = n(v.truco.nivel);
   v.listos = [!!v.listos?.[0], !!v.listos?.[1]]; v.numeroMano = n(v.numeroMano);
-  const TIPOS = ["jugar", "canto", "quiero", "no_quiero", "con_flor_me_achico", "tanto", "son_buenas", "son_mejores", "en_mesa", "mostrar", "mazo", "seguir"];
+  const TIPOS = ["jugar", "canto", "quiero", "no_quiero", "con_flor_me_achico", "tanto", "son_buenas", "son_mejores", "en_mesa", "mostrar", "mazo", "seguir", "mazo_peluca", "trampa"];
   v.acciones = (Array.isArray(v.acciones) ? v.acciones : []).filter(a => a && TIPOS.includes(a.t) && (a.t !== "canto" || a.c in CANTO) && (a.t !== "jugar" || idValido(a.carta)))
     .map(a => (a.t === "canto" ? { t: a.t, c: a.c } : a.t === "jugar" ? { t: a.t, carta: a.carta } : { t: a.t }));
   if (v.cantoPendiente && !(v.cantoPendiente.c in CANTO)) v.cantoPendiente = null;
@@ -228,6 +299,8 @@ async function procesar(v, eventos) {
   const prev = vista;
   if (eventos.some(e => e.t === "reparto")) { cerrarCapa(); await juntarYMezclar(); vista = v; render(eventos, false, true); }
   else { vista = v; render(eventos, false, false); }
+  if (!prev && rivalPerfil) caraACara(); // el perfil del rival llegó antes que la primera mesa
+  if (modo === "invitado") G.contarMio(misCuentas, eventos, v.yo, [...v.miMano, ...v.bazas.map(b => b["c" + v.yo]).filter(Boolean)], v.envido?.tantos);
   cantar(eventos, prev);
 }
 
@@ -303,7 +376,12 @@ function tocarCarta(el) {
 
 function render(eventos, sinAnim, reparto) {
   const v = vista, m = medidas();
-  $("#nombre-rival").textContent = v.nombres[rv()];
+  const pr = perfiles1v1[rv()];
+  if (pr) $("#nombre-rival").innerHTML = Perfil.nombreHTML(pr, { titulo: true }); else $("#nombre-rival").textContent = v.nombres[rv()];
+  const ac = G.accesoriosDe(pr, enClasif), po = v.poderes || {};
+  $("#poderes-rival").innerHTML = (ac.gorra ? G.gorraMini() : "") + (ac.peluca ? `<span class="pelu-dot" style="background:${ac.peluca}" title="peluca"></span>` : "")
+    + (po.peluca?.[rv()] > 0 ? '<span class="mini-chip">peluca</span>' : "") + (po.trampa?.[rv()] > 0 ? '<span class="mini-chip">trampa</span>' : "");
+  $("#btn-mate").hidden = !(modo !== "practica" && Perfil.mateDisponible(enClasif) && v.fase !== "fin_partida");
   $("#chip-rival").hidden = v.mano !== rv() || v.fase !== "jugando";
   if (elegida && !v.miMano.includes(elegida)) elegida = null;
 
@@ -426,6 +504,7 @@ function renderNota(v, m) {
     if (e.puntos != null && e.ganador != null) lineas.push(`envido: ${e.ganador === v.yo ? "vos" : esc(v.nombres[rv()])} +${e.puntos}`);
     if (a != null || b != null) lineas.push(`vos ${a ?? "—"} · ${esc(v.nombres[rv()])} ${b ?? "—"}`);
     if (e.enMesaPedido) lineas.push((e.mostradas?.length ? "las mostró" : "pidió las cartas en mesa"));
+    if (e.mintio) lineas.push(`<b>¡mintió! tenía ${+e.real}</b>`);
   }
   el.innerHTML = lineas.map(l => `<span>${l}</span>`).join("");
   el.style.top = (m.mesaY + m.th * 0.95) + "px";
@@ -446,10 +525,15 @@ function renderAcciones(v) {
   }
   const resp = acc.filter(a => ["quiero", "no_quiero", "con_flor_me_achico", "son_buenas", "son_mejores", "tanto", "mostrar", "seguir"].includes(a.t));
   const cantos = acc.filter(a => a.t === "canto");
-  const chicas = acc.filter(a => a.t === "en_mesa" || a.t === "mazo");
+  const chicas = acc.filter(a => ["en_mesa", "mazo", "mazo_peluca", "trampa"].includes(a.t));
   if (resp.length) {
     const f = fila();
     for (const a of resp) {
+      if (a.t === "tanto" || a.t === "son_mejores") {
+        const min = a.t === "son_mejores" ? liderDicho(v.envido) + 1 : 0;
+        if (min <= 33) selectorTanto(f, { real: tanto(), min, tipo: a.t, enviar: enviarAccion, alTocar: () => S.desbloquear() });
+        continue;
+      }
       const t = { quiero: "Quiero", no_quiero: "No quiero", con_flor_me_achico: "Con flor me achico", son_buenas: "Son buenas", son_mejores: `¡${tanto() ?? ""} son mejores!`, tanto: `Tengo ${tanto() ?? ""}`, mostrar: "Mostrar las cartas", seguir: "Siguiente mano" }[a.t];
       boton(f, t, ["quiero", "tanto", "son_mejores", "mostrar", "seguir"].includes(a.t) ? "fuerte" : "", () => enviarAccion(a));
     }
@@ -462,6 +546,8 @@ function renderAcciones(v) {
     const f = fila();
     for (const a of chicas) {
       if (a.t === "en_mesa") boton(f, "Las quiero en mesa", "chico alerta", () => enviarAccion(a));
+      else if (a.t === "mazo_peluca") boton(f, "Mazo con peluca", "chico poder", () => enviarAccion(a));
+      else if (a.t === "trampa") boton(f, "Hacer la trampa", "chico poder", () => enviarAccion(a));
       else { const b = boton(f, "Irme al mazo", "chico", () => { if (!confirmaMazo) { confirmaMazo = true; b.textContent = "¿Seguro? Tocá de nuevo"; b.classList.add("alerta"); setTimeout(() => { confirmaMazo = false; if (b.isConnected) { b.textContent = "Irme al mazo"; b.classList.remove("alerta"); } }, 2500); } else enviarAccion(a); }); }
     }
   }
@@ -481,6 +567,8 @@ function cantar(eventos, prev) {
   let t = 0;
   for (const e of eventos) {
     if (e.t === "fin_partida") { const k = e.ganador === vista.yo ? "gane" : "perdi"; setTimeout(() => S.decir(k), t + 1200); continue; }
+    if (e.t === "trampa") { setTimeout(() => { bocadillo(e.jugador, "¡Trampa!"); if (e.a === vista.yo) aviso("Te hicieron la trampa: te cambiaron una carta de la mano"); }, t); t += 1150; continue; }
+    if (e.t === "mazo" && e.peluca) { setTimeout(() => { S.decir("mazo"); bocadillo(e.jugador, "Me voy… con peluca"); }, t); t += 1150; continue; }
     const k = claveVoz(e, prev); if (!k) continue;
     const dichos = [];
     if (e.t === "canto" && ENVIDOS.includes(e.c) && TRUCOS.includes(prev?.cantoPendiente?.c)) dichos.push("envido_primero");
@@ -557,7 +645,7 @@ function hojaMenu() {
   const link = codigo ? `<button class="b claro" data-copiar>Copiar el link de la mesa</button>` : "";
   return `<div class="hoja"><h2>Menú</h2><p class="sala">${modo === "practica" ? "práctica contra la máquina" : "partida por link"} · a ${vista.meta}${vista.flor ? " · con flor" : ""}</p>
     <button class="b claro" data-sonido>${S.estaActivo() ? "Silenciar las voces" : "Prender las voces"}</button>${link}
-    <button class="b claro" data-reglas>Reglas rápidas</button><button class="b claro" data-salir>Salir de la mesa</button><button class="b" data-cerrar>Volver</button></div>`;
+    ${botonPantalla()}<button class="b claro" data-reglas>Reglas rápidas</button><button class="b claro" data-salir>Salir de la mesa</button><button class="b" data-cerrar>Volver</button></div>`;
 }
 function hojaReglas() {
   return `<div class="hoja"><h2>Reglas rápidas</h2>
@@ -576,6 +664,7 @@ function abrirCapa(html) {
     if (t.closest("[data-accion]")) { const a = t.closest("[data-accion]").dataset.accion; if (a === "seguir") cerrarCapa(); enviarAccion({ t: a }); }
     if (t.closest("[data-otra]")) nuevaPartidaMismaMesa();
     if (t.closest("[data-revancha]")) { red.enviar({ t: "revancha" }); aviso(`Le avisé a ${nombreRival()}`); }
+    if (t.closest("[data-pantalla]")) { alternarPantalla(); setTimeout(() => abrirCapa(hojaMenu()), 300); }
     if (t.closest("[data-sonido]")) { S.setActivo(!S.estaActivo()); abrirCapa(hojaMenu()); }
     if (t.closest("[data-copiar]")) copiarLink();
     if (t.closest("[data-reglas]")) abrirCapa(hojaReglas());

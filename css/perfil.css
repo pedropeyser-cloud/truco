@@ -1,0 +1,127 @@
+/* Cuenta, conectados, invitaciones y la hoja del perfil (tanda 4B). Misma paleta: noche, papel, una luz ámbar. */
+
+.cuenta { width: 100%; max-width: 380px; margin-bottom: 18px; display: flex; flex-direction: column; gap: 10px; }
+.cuenta-fila { display: flex; flex-direction: column; gap: 10px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 14px; padding: 14px; }
+.cuenta-txt { font-size: 14.5px; line-height: 1.4; color: var(--texto-suave); }
+.b.google { display: flex; align-items: center; justify-content: center; gap: 10px; background: var(--papel); color: var(--tinta); border-color: var(--papel); font-weight: 600; }
+.cuenta-alta { display: flex; flex-direction: column; gap: 10px; background: var(--superficie); border: 1px solid var(--linea); border-radius: 14px; padding: 14px; }
+.cuenta-error { font-size: 13.5px; color: #e8866f; min-height: 0; }
+.cuenta-error:empty { display: none; }
+.b.chico { background: transparent; border-color: transparent; color: var(--gris); min-height: 34px; padding: 4px 8px; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+.b.chico:disabled { text-decoration: none; opacity: .6; }
+
+.cuenta-yo { display: flex; align-items: center; gap: 8px; }
+.cuenta-u { font-size: 19px; font-weight: 600; }
+.cuenta-gloria { font-family: Caveat; font-size: 21px; color: var(--ambar); flex: 1; white-space: nowrap; }
+.punto { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--gris); }
+.punto.si { background: #6fbf73; box-shadow: 0 0 6px rgba(111,191,115,.6); }
+.punto.ocupado { background: var(--ambar); }
+
+.conectados { background: var(--superficie); border: 1px solid var(--linea); border-radius: 14px; padding: 10px 12px 6px; }
+.campo-t { font-family: Plex; font-size: 12px; color: var(--gris); margin-bottom: 4px; }
+.conectados ul { list-style: none; padding: 0; max-height: 210px; overflow-y: auto; }
+.conectados li { display: flex; align-items: center; gap: 8px; min-height: 40px; border-top: 1px solid var(--linea); }
+.conectados li:first-child { border-top: 0; }
+.conectados .u { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conectados .est { font-family: Plex; font-size: 11px; color: var(--ambar); }
+.conectados .vacio { font-size: 14px; color: var(--gris); }
+.conectados .b.chico { color: var(--ambar); }
+
+/* la invitación que llega: cartel arriba */
+.invitacion { position: fixed; z-index: 80; left: 50%; top: calc(14px + env(safe-area-inset-top)); transform: translateX(-50%); width: min(380px, calc(100% - 32px));
+  background: var(--papel); color: var(--tinta); border-radius: 12px; padding: 14px; box-shadow: 0 18px 40px rgba(0,0,0,.6); animation: sube .35s cubic-bezier(.2,.9,.2,1); }
+.invitacion p { font-size: 16px; margin-bottom: 10px; }
+.invitacion .tipo { color: #6c6759; font-size: 14px; }
+.invitacion .b { background: var(--tinta); color: var(--papel); border-color: var(--tinta); }
+.invitacion .b:not(.fuerte) { background: transparent; color: var(--tinta); border-color: #b9b09b; }
+
+/* cara a cara en la barra del 1 contra 1 */
+.cara-a-cara { font-family: Plex; font-size: 11.5px; color: var(--gris); white-space: nowrap; }
+.cara-a-cara.gana { color: #6fbf73; }
+.cara-a-cara.pierde { color: #e8866f; }
+
+/* la hoja del perfil */
+.hoja.perfil h3 { font-family: Plex; font-size: 12px; font-weight: 500; color: #6c6759; text-transform: uppercase; letter-spacing: .06em; margin: 18px 0 2px; }
+.hoja.perfil .cifras { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.hoja.perfil .cifras div { border: 1px solid #d3cab5; border-radius: 10px; padding: 8px 6px; text-align: center; }
+.hoja.perfil .cifras b { display: block; font-family: Caveat; font-size: 34px; line-height: .9; color: var(--ambar-p); }
+.hoja.perfil .cifras span { font-family: Plex; font-size: 11px; color: #6c6759; }
+.hoja.perfil ul { margin: 4px 0 6px; }
+.hoja.perfil li { align-items: center; }
+.hoja.perfil li small { display: block; font-family: Plex; font-size: 10.5px; color: #8a8373; }
+.hoja.perfil .reg { font-family: Plex; font-size: 14px; font-weight: 600; white-space: nowrap; }
+.hoja.perfil .reg.gana { color: #2f7d3a; }
+.hoja.perfil .reg.pierde { color: #b5452f; }
+.hoja.perfil .vacio { font-size: 14px; color: #6c6759; }
+.hoja.perfil input[type=text] { background: #f6f1e5; color: var(--tinta); border-color: #c9c0ab; font-size: 16px; padding: 10px 12px; }
+.hoja.perfil .equipo { border: 1px solid #d3cab5; border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.hoja.perfil .eq-cab { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.hoja.perfil .eq-cab small { font-family: Plex; font-size: 11px; color: #6c6759; }
+.hoja.perfil .miembros { font-size: 14.5px; margin: 4px 0 6px; }
+.hoja.perfil .nota-eq { font-size: 13px; color: #6c6759; margin: 0; }
+.hoja.perfil .sumar { display: flex; gap: 6px; }
+.hoja.perfil .sumar .b { width: auto; margin-top: 0; flex: none; }
+.hoja.perfil .b.chico-h { min-height: 36px; font-size: 14px; padding: 6px 10px; width: auto; margin-top: 6px; }
+.hoja.perfil li .b.chico-h { margin-top: 0; flex: none; }
+.hoja.perfil .nuevo-equipo { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.hoja.perfil .segm { display: flex; gap: 14px; font-size: 15px; }
+.hoja.perfil .segm label { display: flex; align-items: center; gap: 6px; }
+
+/* ---------- tanda 4C: pinta del nombre, objetos, vitrina, estilo de juego ---------- */
+.nombre-g { display: inline-flex; align-items: center; gap: 4px; }
+.nombre-g .insignia { flex: none; image-rendering: pixelated; filter: drop-shadow(0 1px 2px rgba(0,0,0,.5)); }
+.titulo-n { display: block; font-family: Caveat; font-size: 15px; line-height: 1; color: var(--ambar); opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.cuenta-quien { flex: 1; min-width: 0; font-size: 19px; font-weight: 600; }
+.cuenta-gloria { font-family: Caveat; font-size: 20px; color: var(--ambar); margin: -4px 0 0 16px; }
+.cuenta-gloria b { font-size: 24px; }
+.b.clasif { display: flex; align-items: center; justify-content: center; gap: 10px; border-color: rgba(240,169,59,.5); }
+.liga { font-family: Plex; font-size: 11px; padding: 2px 8px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
+.liga.bronce { color: #d08b57; } .liga.plata { color: #c9d0d8; } .liga.oro { color: #e8c35a; }
+.hoja .liga.plata { color: #6f7782; } .hoja .liga.oro { color: #a8801a; } .hoja .liga.bronce { color: #9a5a2c; }
+
+.poderes-rival { display: inline-flex; align-items: center; gap: 4px; }
+.poderes-rival svg { display: block; }
+.pelu-dot { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid var(--tinta); box-shadow: 3px 0 0 -1px currentColor; }
+#nombre-rival .titulo-n { font-size: 13px; max-width: 140px; }
+.asiento .etq .n { display: inline-flex; flex-direction: column; align-items: flex-start; }
+.asiento .etq .titulo-n { font-size: 12.5px; max-width: 120px; }
+
+.b-icono.mate { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(240,169,59,.4); background: rgba(240,169,59,.06); }
+.b-icono.mate.tomando svg { animation: sorbo 1.2s ease-in-out; }
+@keyframes sorbo { 30% { transform: rotate(-24deg) translateY(-2px); } 60% { transform: rotate(-24deg) translateY(-2px); } }
+.acciones .b.chico.poder { color: var(--ambar); text-decoration-style: dotted; }
+
+.hoja.perfil .cab-perfil { display: flex; flex-direction: column; align-items: flex-start; }
+.hoja.perfil .cab-perfil .titulo-n { font-size: 20px; color: var(--ambar-p); max-width: 100%; }
+.hoja.perfil .vitrina li { align-items: flex-start; }
+.hoja.perfil .vitrina li b { font-family: Plex; font-size: 12px; color: var(--ambar-p); margin-right: 4px; }
+.hoja.perfil .vitrina li.no { opacity: .6; }
+.hoja.perfil .vitrina .estado-u { font-family: Plex; font-size: 12px; white-space: nowrap; color: #2f7d3a; }
+.hoja.perfil .vitrina li.no .estado-u { color: #6c6759; }
+.hoja.perfil .estilo-juego { margin-top: 14px; border: 1px solid #d3cab5; border-radius: 10px; padding: 10px 12px; }
+.hoja.perfil .estilo-juego small { font-family: Plex; font-size: 11px; color: #6c6759; display: block; }
+.hoja.perfil .estilo-juego b { font-family: Caveat; font-size: 28px; color: var(--ambar-p); line-height: 1.1; }
+.hoja.perfil .estilo-juego p { font-size: 14.5px; margin: 2px 0 0; }
+.hoja.perfil .pinta { display: flex; flex-direction: column; gap: 8px; border: 1px solid #d3cab5; border-radius: 10px; padding: 4px 12px 12px; margin-top: 14px; }
+.hoja.perfil .pinta .muestra { background: var(--noche); color: var(--papel); border-radius: 8px; padding: 10px 12px; font-size: 19px; font-weight: 600; }
+.hoja.perfil .pinta .campo > span { color: #6c6759; }
+.hoja.perfil select { background: #f6f1e5; color: var(--tinta); border: 1px solid #c9c0ab; border-radius: 10px; padding: 9px 10px; font: 15px Bricolage; width: 100%; }
+.hoja.perfil .dos { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.hoja.perfil .tilde { display: flex; align-items: center; gap: 8px; font-size: 15px; }
+
+/* ---------- tanda 4D: clasificatoria ---------- */
+.hoja.clasif .liga-cab { display: flex; align-items: center; gap: 10px; font-family: Plex; font-size: 13px; margin: 6px 0; }
+.hoja.clasif .liga-cab .liga { font-size: 14px; padding: 3px 10px; }
+.barra-liga { height: 8px; border-radius: 99px; background: #ddd4c0; overflow: hidden; margin-bottom: 10px; }
+.barra-liga i { display: block; height: 100%; background: linear-gradient(90deg, #b8621b, #e8c35a); border-radius: 99px; }
+.hoja.clasif .modos { margin: 10px 0 4px; background: #e2d9c6; border-color: #c9c0ab; }
+.hoja.clasif .modos button { color: #4b463c; }
+.hoja.clasif .modos button[aria-pressed=true] { background: var(--tinta); color: var(--papel); }
+.hoja.clasif .rivales li.cerca { background: rgba(240,169,59,.12); border-radius: 8px; padding-left: 6px; padding-right: 6px; }
+.hoja.clasif .rivales small { display: block; }
+.hoja.clasif .previa { color: #2f7d3a; }
+.hoja .b:disabled { opacity: .45; }
+/* los colores del nombre están pensados para la noche: en la hoja de papel, el nombre va sobre una placa oscura */
+.hoja.perfil .cab-perfil { background: var(--noche); color: var(--papel); padding: 10px 14px; border-radius: 10px; margin-bottom: 8px; }
+.hoja.perfil .cab-perfil .titulo-n { color: var(--ambar); }
+.hoja.clasif .rivales li b { font-family: Bricolage; font-size: 16px; color: var(--tinta); }

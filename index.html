@@ -17,7 +17,9 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="stylesheet" href="css/estilo.css">
 <link rel="stylesheet" href="css/mesa.css">
+<link rel="stylesheet" href="css/perfil.css">
 <script src="js/vendor/peerjs.min.js" defer></script>
+<script src="js/vendor/supabase.js" defer></script>
 <script type="module" src="js/app.js"></script>
 </head>
 <body>
@@ -27,6 +29,8 @@
   <div class="inicio-cartas" aria-hidden="true"><div class="ic ic1"></div><div class="ic ic2"></div></div>
   <h1>truco</h1>
   <p class="mano-sub">el barajador reparte</p>
+
+  <div id="bloque-cuenta" class="cuenta" hidden></div>
 
   <div id="bloque-crear" class="bloque">
     <label class="campo"><span>Tu nombre</span><input id="in-nombre" type="text" maxlength="16" autocomplete="nickname" placeholder="Cómo te ven en la mesa"></label>
@@ -107,7 +111,10 @@
       <span class="punto-red" id="punto-red" title="conexión"></span>
       <span id="nombre-rival" class="nombre"></span>
       <span id="chip-rival" class="chip" hidden>mano</span>
+      <span id="cara-a-cara" class="cara-a-cara" hidden></span>
+      <span id="poderes-rival" class="poderes-rival"></span>
     </div>
+    <button id="btn-mate" class="b-icono mate" aria-label="Tomar un mate" title="Tomar un mate" hidden></button>
     <button id="btn-tanteador" class="tanteador-mini" aria-label="Ver el tanteador"></button>
     <button id="btn-menu" class="b-icono" aria-label="Menú">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>
@@ -124,6 +131,7 @@
 <section id="mesa-eq" class="pantalla juego eq" hidden>
   <header class="barra">
     <div class="rival"><span class="punto-red" id="eq-red" title="conexión"></span><span id="eq-titulo" class="nombre"></span></div>
+    <button id="eq-mate" class="b-icono mate" aria-label="Tomar un mate" title="Tomar un mate" hidden></button>
     <button id="eq-tanteador" class="tanteador-mini" aria-label="Ver el tanteador"></button>
     <button id="eq-menu" class="b-icono" aria-label="Menú">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.8" fill="currentColor"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><circle cx="19" cy="12" r="1.8" fill="currentColor"/></svg>

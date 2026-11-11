@@ -96,6 +96,10 @@ function decidir(v, acc, rnd, senas) {
 
   const propias = [...v.miMano, ...v.bazas.map((b) => b.cartas[v.yo]).filter(Boolean)];
   const tanto = tantoDe(propias);
+  if (hay("son_mejores") && hay("son_buenas")) { // el bot no miente con el número: dice la verdad
+    const lider = Math.max(-1, ...(v.envido?.tantos || []).filter((x) => x != null));
+    return tanto > lider ? hay("son_mejores") : hay("son_buenas");
+  }
   const flor = v.flor && esFlor(propias) ? tantoFlor(propias) : null;
   const p = v.cantoPendiente;
   const atras = v.puntos[1 - v.equipo] - v.puntos[v.equipo];
