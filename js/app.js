@@ -197,6 +197,10 @@ function sanear(v) {
     v.envido.tantos = [0, 1].map(j => v.envido.tantos?.[j] == null ? null : n(v.envido.tantos[j])); }
   if (v.truco) v.truco.nivel = n(v.truco.nivel);
   v.listos = [!!v.listos?.[0], !!v.listos?.[1]]; v.numeroMano = n(v.numeroMano);
+  const TIPOS = ["jugar", "canto", "quiero", "no_quiero", "con_flor_me_achico", "tanto", "son_buenas", "son_mejores", "en_mesa", "mostrar", "mazo", "seguir"];
+  v.acciones = (Array.isArray(v.acciones) ? v.acciones : []).filter(a => a && TIPOS.includes(a.t) && (a.t !== "canto" || a.c in CANTO) && (a.t !== "jugar" || idValido(a.carta)))
+    .map(a => (a.t === "canto" ? { t: a.t, c: a.c } : a.t === "jugar" ? { t: a.t, carta: a.carta } : { t: a.t }));
+  if (v.cantoPendiente && !(v.cantoPendiente.c in CANTO)) v.cantoPendiente = null;
   v.resumenMano = Array.isArray(v.resumenMano) ? v.resumenMano.map(x => ({ quien: x.quien === 1 ? 1 : 0, motivo: String(x.motivo ?? ""), puntos: n(x.puntos) })) : null;
   return v;
 }
@@ -413,7 +417,7 @@ function renderAcciones(v) {
   const misCartas = () => [...v.miMano, ...v.bazas.map(b => b["c" + v.yo]).filter(Boolean)];
   const tanto = () => { try { return M.tantoDe(misCartas()); } catch { return null; } };
   const fila = () => { const f = document.createElement("div"); f.className = "fila-acc"; nav.appendChild(f); return f; };
-  const boton = (f, txt, clase, fn) => { const b = document.createElement("button"); b.className = "b " + clase; b.innerHTML = txt; b.onclick = () => { S.desbloquear(); fn(); }; f.appendChild(b); return b; };
+  const boton = (f, txt, clase, fn) => { const b = document.createElement("button"); b.className = "b " + clase; b.textContent = txt; b.onclick = () => { S.desbloquear(); fn(); }; f.appendChild(b); return b; };
 
   if (v.fase === "fin_partida") {
     const f = fila();
