@@ -77,10 +77,14 @@ function ojos() {
 }
 
 /** SVG de la cara del asiento `i` (forma de cabeza = i % 6). */
-export function cara(i, etiqueta = "cara") {
+export function cara(i, etiqueta = "cara", { busto = false, color = "#5b616c" } = {}) {
   const craneo = CRANEOS[i % CRANEOS.length].replace("/>", ` fill="${PAPEL}" stroke="${TINTA}" stroke-width="${G}"/>`);
-  return `<svg class="cara-jugador" viewBox="0 0 200 210" role="img" aria-label="${etiqueta}" data-boca="normal" data-ojos="abiertos" data-cejas="normal" data-cach="no">
-    <g class="cabeza">${craneo}
+  // busto: hombros del color del equipo y cuello, detrás de la cabeza
+  const cuerpo = busto ? `<path d="M6 300C8 238 50 208 100 208C150 208 192 238 194 300Z" fill="${color}" stroke="${TINTA}" stroke-width="${G}"/>
+    <path d="M78 212L100 246L122 212" fill="none" stroke="${TINTA}" stroke-width="4" stroke-linejoin="round" opacity=".55"/>
+    <rect x="82" y="176" width="36" height="40" rx="10" fill="${PAPEL}" stroke="${TINTA}" stroke-width="${G}"/>` : "";
+  return `<svg class="cara-jugador" viewBox="0 0 200 ${busto ? 300 : 210}" role="img" aria-label="${etiqueta}" data-boca="normal" data-ojos="abiertos" data-cejas="normal" data-cach="no">
+    ${cuerpo}<g class="cabeza">${craneo}
       <g class="rasgos">
         <ellipse class="cachete" cx="64" cy="138" rx="11" ry="8" fill="${AMBAR}" opacity=".38"/><ellipse class="cachete" cx="136" cy="138" rx="11" ry="8" fill="${AMBAR}" opacity=".38"/>
         <g class="cejas"><path d="M63 84Q76 77 89 83" fill="none" stroke="${TINTA}" stroke-width="${G}" stroke-linecap="round"/><path d="M111 83Q124 77 137 84" fill="none" stroke="${TINTA}" stroke-width="${G}" stroke-linecap="round"/></g>

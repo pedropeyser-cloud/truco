@@ -6,6 +6,7 @@ import { frente, dorso, nombreCarta, idValido } from "./cartas.js";
 import * as S from "./sonido.js";
 import { abrirSala, entrarSala, codigoNuevo, linkDe } from "./red.js";
 import * as Mesa from "./mesa.js"; // mesas de 4 y 6 (2 contra 2, 3 contra 3)
+import { azarDe } from "./bot-equipos.js";
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -66,6 +67,7 @@ function iniciar() {
 function leerForm() {
   const nombre = ($("#in-nombre").value.trim() || "Yo").slice(0, 16); guardarNombre(nombre);
   return { nombre, meta: +document.querySelector("[data-meta][aria-pressed=true]").dataset.meta, flor: document.querySelector("[data-flor][aria-pressed=true]").dataset.flor === "1",
+    dificultad: document.querySelector("[data-nivel][aria-pressed=true]")?.dataset.nivel || "normal",
     jugadores: jugadoresElegidos(), puntaYHacha: jugadoresElegidos() > 2 && document.querySelector("[data-punta][aria-pressed=true]")?.dataset.punta === "1" };
 }
 function jugadoresElegidos() { return +(document.querySelector("[data-jug][aria-pressed=true]")?.dataset.jug || 2); }
@@ -178,7 +180,7 @@ function programarBot() {
   const finMano = acc.every(a => a.t === "seguir" || a.t === "mostrar" || a.t === "en_mesa");
   if (acc.every(a => a.t === "en_mesa")) return;  // pedir en mesa es decisión del bot solo cuando además le toca algo
   const espera = (finMano ? 2600 : 900 + Math.random() * 900) + Math.max(0, 2800 - (Date.now() - ultimoReparto));
-  botTimer = setTimeout(() => { try { hostAplicar(1, Bot.elegir(M.vista(estado, 1))); } catch (e) { console.error(e); } }, espera);
+  botTimer = setTimeout(() => { try { hostAplicar(1, Bot.elegir(M.vista(estado, 1), azarDe(config.dificultad))); } catch (e) { console.error(e); } }, espera);
 }
 
 // ================= JUEGO =================

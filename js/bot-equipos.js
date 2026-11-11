@@ -56,6 +56,8 @@ function fuerzaTruco(v, senas) {
   const deCompas = (senas && senas.cartas || []).map((k) => FUERZA_SENA[k] || 0);
   const todas = [...mias, ...deCompas].sort((a, b) => b - a).slice(0, 3);
   let puntaje = todas.reduce((t, f) => t + Math.max(0, f - 5), 0);
+  // el difícil también mira las señas de los rivales: cada brava que mostraron le resta
+  for (const k of (senas && senas.rivales) || []) puntaje -= Math.max(0, (FUERZA_SENA[k] || 0) - 8);
   for (const b of v.bazas) {
     if (b.gana === v.equipo) puntaje += 5;
     else if (b.gana !== null && b.gana !== "parda") puntaje -= 5;
@@ -156,13 +158,28 @@ function decidir(v, acc, rnd, senas) {
   return acc.find((a) => a.t !== "mazo") || acc[0];
 }
 
-/** Elige una acción para la vista de equipos. `azar` y `senas` son opcionales. */
-export function elegir(vista, { azar, senas } = {}) {
+/**
+ * Dificultad: cambia el azar con que el bot comete errores y miente.
+ * fácil = números bajos (acepta y miente al tuntún, a veces tira cualquier carta);
+ * difícil = números altos (casi no se equivoca). Sirve también para el bot de 1 contra 1.
+ */
+export function azarDe(nivel, base = Math.random) {
+  if (nivel === "facil") return () => base() * 0.55;
+  if (nivel === "dificil") return () => 0.45 + base() * 0.55;
+  return base;
+}
+
+/** Elige una acción para la vista de equipos. `azar`, `senas` y `nivel` son opcionales. */
+export function elegir(vista, { azar, senas, nivel = "normal" } = {}) {
   const acc = vista.acciones || [];
   if (!acc.length) return null;
-  const rnd = azar || generador(semillaDe(vista));
+  const base = azar || generador(semillaDe(vista));
+  const rnd = azarDe(nivel, base);
   let decision;
-  if (vista.tipoMano === "punta" && vista.miDuelo && vista.fase === "jugando") {
+  const jugar = acc.filter((a) => a.t === "jugar");
+  if (nivel === "facil" && vista.fase === "jugando" && jugar.length && base() < 0.4) {
+    decision = jugar[Math.floor(base() * jugar.length)]; // el fácil a veces tira cualquiera
+  } else if (vista.tipoMano === "punta" && vista.miDuelo && vista.fase === "jugando") {
     decision = Bot.elegir({ ...vista.miDuelo.vista, acciones: acc }, rnd);
   } else if (vista.fase !== "jugando") {
     decision = acc.find((a) => a.t === "mostrar") || acc.find((a) => a.t === "seguir") || acc[0];

@@ -173,7 +173,7 @@ function programarBots() {
     botTimers.set(j, setTimeout(() => {
       botTimers.delete(j);
       if (asientos[j]?.tipo !== "bot" || !E.acciones(estado, j).length) return programarBots();
-      try { hostAplicar(j, BotE.elegir(E.vista(estado, j), { senas: senasPara(j) })); } catch (e) { console.error(e); }
+      try { hostAplicar(j, BotE.elegir(E.vista(estado, j), { senas: senasPara(j), nivel: config.dificultad || "normal" })); } catch (e) { console.error(e); }
       programarBots();
     }, pausa));
   });
@@ -181,17 +181,21 @@ function programarBots() {
 
 /** Lo que el bot sabe de sus compañeros: las señas de cartas y las respuestas con la cabeza. */
 function senasPara(j) {
-  const cartas = [], equipo = E.equipoDe(j);
+  const cartas = [], rivales = [], equipo = E.equipoDe(j);
   let tanto = 0;
   senasMano.forEach((lista, x) => {
-    if (x === j || E.equipoDe(x) !== equipo) return;
+    if (E.equipoDe(x) !== equipo) { // solo el difícil está atento a las señas de los rivales
+      if (config.dificultad === "dificil") for (const g of lista) if (g.tipo === "sena" && g.k !== "nada" && g.k !== "flor") rivales.push(g.k);
+      return;
+    }
+    if (x === j) return;
     for (const g of lista) {
       if (g.tipo === "sena" && g.k !== "nada" && g.k !== "flor") cartas.push(g.k);
       if (g.tipo === "cabeza" && g.a === "p_envido" && g.k === "si") tanto = Math.max(tanto, 28);
       if (g.tipo === "cabeza" && g.a === "p_mas27" && g.k === "mas") tanto = Math.max(tanto, 30);
     }
   });
-  return { cartas, tanto };
+  return { cartas, tanto, rivales };
 }
 
 function planificarSenasBots() {
@@ -319,7 +323,7 @@ function pintarAsientosLobby(lista, yo, cfg, editable = false) {
   ul.innerHTML = lista.map((a, j) => `<li data-j="${j}" class="${E.equipoDe(j) === E.equipoDe(yo) ? "nos" : "ellos"}${cambio === j ? " elegido" : ""}">
       <span class="lugar-n">${j + 1}</span><i></i><span class="quien">${a ? esc(a.nombre) + (j === yo ? " (vos)" : "") : "libre"}</span>
       <span class="tipo">${a ? (a.tipo === "bot" ? "bot" : "") : "si no llega nadie, un bot"}</span></li>`).join("");
-  $("#lobby-sala").textContent = `mesa de ${lista.length} · a ${cfg.meta || 15}${cfg.flor ? " · con flor" : ""}${cfg.puntaYHacha ? " · punta y hacha" : ""}`;
+  $("#lobby-sala").textContent = `mesa de ${lista.length} · a ${cfg.meta || 15}${cfg.flor ? " · con flor" : ""}${cfg.puntaYHacha ? " · punta y hacha" : ""} · bots ${({ facil: "fáciles", dificil: "difíciles" })[cfg.dificultad] || "normales"}`;
   $("#lobby-ayuda").hidden = !editable;
   if (!editable) return;
   ul.onclick = (e) => {
@@ -340,6 +344,11 @@ function puntoRed(ok) { const p = $("#eq-red"); if (p) { p.classList.toggle("si"
 // ================= JUEGO =================
 function abrirJuego() {
   if (!$("#mesa-eq").hidden) return;
+  // tocar fuera de la bandeja de señas la cierra
+  document.addEventListener("pointerdown", (e) => {
+    if (!bandeja || e.target.closest("#eq-bandeja, #eq-gestos")) return;
+    bandeja = null; if (vista) renderGestos(vista, medidas());
+  }, true);
   $("#inicio").hidden = true; $("#mesa-eq").hidden = false;
   $("#eq-tanteador").onclick = () => abrirCapa(hojaTanteador());
   $("#eq-menu").onclick = () => abrirCapa(hojaMenu());
@@ -389,11 +398,15 @@ async function procesar(v, eventos) {
   cantar(eventos, prev);
 }
 
-// ---------- ubicación de los asientos ----------
+// ---------- la mesa en perspectiva: tablero 3D, bustos detrás del borde, cartas que caen ----------
+// Lugares de cada asiento sobre el tablero (u: 0 izquierda → 1 derecha, v: 0 borde lejano → 1 tu borde),
+// por posición relativa a vos (r = 1 es el que juega después de vos).
 const LUGARES = {
-  4: [null, [0.88, 0.5], [0.5, 0.07], [0.12, 0.5]],
-  6: [null, [0.87, 0.7], [0.87, 0.26], [0.5, 0.06], [0.13, 0.26], [0.13, 0.7]],
+  4: [null, [1, 0.5], [0.5, 0], [0, 0.5]],
+  6: [null, [1, 0.62], [0.8, 0], [0.5, 0], [0.2, 0], [0, 0.62]],
 };
+const CENTRO_MESA = [0.5, 0.47];
+const posAsiento = [];
 function medidas() {
   const mesa = $("#eq-mesa"), W = mesa.clientWidth, H = mesa.clientHeight, barH = $("#eq-acciones").offsetHeight;
   const cx = W / 2, ancho = Math.min(W, 560);
@@ -402,34 +415,71 @@ function medidas() {
   const top = (parseFloat(getComputedStyle($("#mesa-eq .barra")).height) || 52) + 6;
   const bottom = manoY - ch / 2 - 8;
   const RH = bottom - top;
-  const cara = Math.max(44, Math.min(W * 0.15, 78, RH * 0.15));
-  const tw = Math.min(ancho * 0.14, 66, RH * 0.17 / RATIO);
-  return { W, H, cx, cw, ch, manoY, top, bottom, RH, cara, tw, ancho };
+  const cara = Math.max(44, Math.min(W * 0.13, 64, RH * 0.13)); // tu cara-espejo
+  const tabW = Math.min(W * 0.96, 760), tabH = Math.min(RH * 0.98, tabW * 1.4);
+  const busto = Math.min(W * 0.3, 150, RH * 0.33);
+  return { W, H, cx, cw, ch, manoY, top, bottom, RH, cara, tabW, tabH, busto, ancho };
+}
+const relativo = (j, v) => (j - v.yo + v.n) % v.n;
+function uvDe(j, v) { return LUGARES[v.n][relativo(j, v)]; }
+
+function armarEscena() {
+  if ($("#eq-escena")) return;
+  const e3 = document.createElement("div");
+  e3.id = "eq-escena"; e3.className = "escena";
+  e3.innerHTML = '<div id="eq-tablero" class="tablero"><div class="canto"></div><div class="ancla" data-a="c"></div></div>';
+  $("#eq-mesa").appendChild(e3);
+}
+function layoutTablero(v, m) {
+  armarEscena();
+  const e3 = $("#eq-escena"), tab = $("#eq-tablero");
+  e3.style.top = m.top + "px"; e3.style.height = m.RH + "px";
+  tab.style.width = m.tabW + "px"; tab.style.height = m.tabH + "px";
+  tab.style.left = (m.cx - m.tabW / 2) + "px"; tab.style.top = (m.RH - m.tabH) + "px";
+  // anclas: un punto por asiento sobre el borde, para saber dónde cae cada busto en la pantalla
+  for (let j = 0; j < v.n; j++) {
+    let a = tab.querySelector(`.ancla[data-a="${j}"]`);
+    if (!a) { a = document.createElement("div"); a.className = "ancla"; a.dataset.a = j; tab.appendChild(a); }
+    const uv = j === v.yo ? [0.5, 1] : uvDe(j, v);
+    a.style.left = (uv[0] * m.tabW - 50) + "px"; a.style.top = (uv[1] * m.tabH) + "px";
+  }
+  let n = tab.querySelector('.ancla[data-a="n"]');
+  if (!n) { n = document.createElement("div"); n.className = "ancla"; n.dataset.a = "n"; tab.appendChild(n); }
+  n.style.left = (0.96 * m.tabW - 50) + "px"; n.style.top = (0.6 * m.tabH) + "px";
+  const c = tab.querySelector('.ancla[data-a="c"]');
+  c.style.left = (CENTRO_MESA[0] * m.tabW - 50) + "px"; c.style.top = (CENTRO_MESA[1] * m.tabH) + "px";
+}
+/** Dónde quedó en la pantalla un punto del tablero (y cuánto lo achica la distancia). */
+function proyectar(sel) {
+  const a = $("#eq-tablero").querySelector(sel), r = a.getBoundingClientRect(), base = $("#eq-mesa").getBoundingClientRect();
+  return { x: r.left + r.width / 2 - base.left, y: r.top - base.top, s: r.width / 100 };
 }
 function lugarDe(j, v, m) {
-  const r = (j - v.yo + v.n) % v.n;
-  if (r === 0) return { x: Math.max(m.cara / 2 + 12, m.cx - m.ancho / 2 + m.cara / 2 + 12), y: m.bottom - m.cara * 0.62 };
-  const [fx, fy] = LUGARES[v.n][r];
-  const ancho = Math.min(m.W, 620), x0 = m.cx - ancho / 2;
-  return { x: x0 + fx * ancho, y: m.top + m.cara * 0.55 + fy * (m.RH - m.cara * 1.6) };
+  if (relativo(j, v) === 0) {
+    const x = Math.max(m.cara / 2 + 12, m.cx - m.ancho / 2 + m.cara / 2 + 12), y = m.bottom - m.cara * 0.62;
+    return { x, y, top: y - m.cara / 2, h: m.cara };
+  }
+  return posAsiento[j] || { x: m.cx, y: m.top + 60, top: m.top + 10, h: 100 };
 }
-function centro(m) { return { x: m.cx, y: m.top + m.RH * 0.47 }; }
+function centro(m) { try { return proyectar('.ancla[data-a="c"]'); } catch { return { x: m.cx, y: m.top + m.RH * 0.5 }; } }
+/** Dónde va la carta de cada uno sobre el tablero (coordenadas del tablero). */
 function lugarCarta(j, v, m) {
-  const r = (j - v.yo + v.n) % v.n, c = centro(m);
-  if (r === 0) return { x: m.cx, y: c.y + m.RH * 0.15 };
-  const p = lugarDe(j, v, m), t = v.n === 6 ? 0.5 : 0.56;
-  return { x: p.x + (c.x - p.x) * t, y: p.y + (c.y - p.y) * t };
+  if (relativo(j, v) === 0) return { x: 0.42 * m.tabW, y: 0.68 * m.tabH };
+  const [u, w] = uvDe(j, v), t = v.n === 6 ? 0.5 : 0.55;
+  return { x: (u + (CENTRO_MESA[0] - u) * t) * m.tabW, y: (w + (CENTRO_MESA[1] - w) * t + 0.03) * m.tabH };
 }
 
 function armarAsientos(v) {
   carasEl.forEach((c) => { c.parar(); c.el.remove(); });
   carasEl = [];
-  const cont = $("#eq-asientos");
   for (let j = 0; j < v.n; j++) {
-    const el = document.createElement("div");
-    el.className = "asiento " + (E.equipoDe(j) === v.equipo ? "nos" : "ellos") + (j === v.yo ? " yo" : "");
-    el.innerHTML = K.cara(j, j === v.yo ? "tu cara" : `cara de ${esc(v.nombres[j])}`) + `<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div><div class="quedan"></div>`;
-    cont.appendChild(el);
+    const el = document.createElement("div"), yo = j === v.yo, nos = E.equipoDe(j) === v.equipo;
+    el.className = "asiento " + (nos ? "nos" : "ellos") + (yo ? " yo" : " busto");
+    el.dataset.j = j;
+    const cara = K.cara(j, yo ? "tu cara" : `${esc(v.nombres[j])}, ${nos ? "de tu equipo" : "rival"}`, yo ? {} : { busto: true, color: nos ? "#f0a93b" : "#5b616c" });
+    el.innerHTML = yo ? cara + '<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div>'
+      : '<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div><div class="quedan"></div>' + cara;
+    (yo ? $("#eq-mesa") : $("#eq-asientos")).appendChild(el);
     const svg = el.querySelector("svg");
     carasEl.push({ el, svg, parar: K.parpadear(svg) });
   }
@@ -467,28 +517,31 @@ function posiciones(v, m) {
   const n = v.miMano.length;
   v.miMano.forEach((id, i) => {
     const off = i - (n - 1) / 2, sel = id === elegida;
-    out.push({ key: id, id, x: m.cx + off * m.cw * 0.74, y: m.manoY + Math.abs(off) * m.cw * 0.07 - (sel ? m.ch * 0.16 : 0), w: m.cw, r: sel ? 0 : off * 8, arriba: true, z: 50 + i, jugable: jugables.has(id), elegida: sel, mia: true });
+    out.push({ key: id, id, x: m.cx + off * m.cw * 0.74, y: m.manoY + Math.abs(off) * m.cw * 0.07 - (sel ? m.ch * 0.16 : 0), w: m.cw, r: sel ? 0 : off * 8, z: 50 + i, jugable: jugables.has(id), elegida: sel });
   });
+  const tw = Math.min(m.tabW, m.tabH * 1.15) * (v.n === 6 ? 0.13 : 0.15); // en pantallas anchas la mesa es baja: manda el fondo
   cartasEnMesa(v).forEach((c, i) => {
     const p = lugarCarta(c.j, v, m);
-    out.push({ key: c.id, id: c.id, x: p.x, y: p.y, w: m.tw, r: giroDe(c.id), arriba: true, z: 30 + i, gana: c.gana, apagada: c.apagada, de: c.j });
+    out.push({ key: "m-" + c.id, id: c.id, x: p.x, y: p.y, w: tw, r: giroDe(c.id) * 2, z: 1 + i, gana: c.gana, apagada: c.apagada, de: c.j, plano: true });
   });
   return out;
 }
 const giroDe = (id) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return (Math.abs(h) % 13) - 6; };
 
-function crearCarta(key, id) {
+function crearCarta(key, id, plano) {
   const el = document.createElement("div");
-  el.className = "carta abajo sin-anim"; el.dataset.key = key;
+  el.className = "carta sin-anim" + (plano ? " en-mesa" : " abajo"); el.dataset.key = key;
   el.innerHTML = `<div class="giro"><div class="cara frente">${id ? frente(id) : ""}</div><div class="cara dorso">${dorso()}</div></div>`;
-  el.addEventListener("click", () => tocarCarta(el));
-  $("#eq-mesa").appendChild(el); cartasEl.set(key, el);
+  if (!plano) el.addEventListener("click", () => tocarCarta(el));
+  (plano ? $("#eq-tablero") : $("#eq-mesa")).appendChild(el); cartasEl.set(key, el);
   return el;
 }
 function ubicar(el, p) {
   const h = p.w * RATIO;
   el.style.width = p.w + "px"; el.style.height = h + "px";
-  el.style.transform = `translate(${p.x - p.w / 2}px, ${p.y - h / 2}px) rotate(${p.r}deg)`;
+  el.style.transform = p.plano
+    ? `translate3d(${p.x - p.w / 2}px, ${p.y - h / 2}px, ${p.alto || 1}px) rotateZ(${p.r}deg)`
+    : `translate(${p.x - p.w / 2}px, ${p.y - h / 2}px) rotate(${p.r}deg)`;
   el.style.zIndex = p.z;
 }
 function tocarCarta(el) {
@@ -502,19 +555,24 @@ function tocarCarta(el) {
 async function juntar() {
   if (!cartasEl.size) return;
   const m = medidas(), c = centro(m);
-  for (const el of cartasEl.values()) { el.style.transitionDelay = "0ms"; el.classList.add("abajo"); ubicar(el, { x: c.x, y: c.y, w: m.tw, r: 0, z: 60 }); }
+  for (const el of cartasEl.values()) {
+    el.style.transitionDelay = "0ms"; el.classList.add("abajo");
+    if (el.classList.contains("en-mesa")) ubicar(el, { x: CENTRO_MESA[0] * m.tabW, y: CENTRO_MESA[1] * m.tabH, w: parseFloat(el.style.width), r: 0, z: 1, plano: true, alto: 2 });
+    else ubicar(el, { x: c.x, y: c.y, w: m.cw * 0.6, r: 0, z: 60 });
+  }
   S.roce(0, 0.5, 0.08);
-  await espera(520);
+  await espera(560);
   for (const el of cartasEl.values()) el.remove();
   cartasEl.clear();
   S.riffle(0, 0.7);
-  await espera(500);
+  await espera(450);
 }
 
 function render(eventos, sinAnim, reparto) {
   const v = vista, m = medidas();
   $("#mesa-eq").style.setProperty("--cara", m.cara + "px");
   if (elegida && !v.miMano.includes(elegida)) elegida = null;
+  layoutTablero(v, m);
   renderAsientos(v, m);
 
   const ps = posiciones(v, m), vivos = new Set(ps.map((p) => p.key)), c = centro(m);
@@ -522,9 +580,13 @@ function render(eventos, sinAnim, reparto) {
   ps.forEach((p, orden) => {
     let el = cartasEl.get(p.key), nueva = false;
     if (!el) {
-      nueva = true; el = crearCarta(p.key, p.id);
-      if (reparto) ubicar(el, { x: c.x, y: c.y, w: m.tw, r: 0, z: 100 });
-      else if (p.de !== undefined && p.de !== v.yo) { const s = lugarDe(p.de, v, m); ubicar(el, { x: s.x, y: s.y, w: m.tw * 0.7, r: 0, z: p.z }); }
+      nueva = true; el = crearCarta(p.key, p.id, p.plano);
+      if (p.plano) {
+        // la carta cae sobre la mesa desde la mano de quien la tira: arranca en el aire, girada
+        const uv = p.de === v.yo ? [0.5, 1.05] : uvDe(p.de, v);
+        ubicar(el, { ...p, x: uv[0] * m.tabW, y: uv[1] * m.tabH, r: p.r + (p.de % 2 ? 35 : -35), alto: 170 });
+        el.style.opacity = 0;
+      } else if (reparto) ubicar(el, { x: c.x, y: c.y, w: m.cw * 0.5, r: 0, z: 100 });
       else { ubicar(el, p); el.style.opacity = 0; }
     }
     el.classList.toggle("jugable", !!p.jugable);
@@ -534,21 +596,20 @@ function render(eventos, sinAnim, reparto) {
     if (p.jugable) { el.setAttribute("role", "button"); el.tabIndex = 0; el.setAttribute("aria-label", nombreCarta(p.id) + (p.elegida ? ", tocá de nuevo para tirarla" : "")); }
     else { el.removeAttribute("role"); el.tabIndex = -1; el.setAttribute("aria-label", nombreCarta(p.id)); }
     if (sinAnim) { el.classList.add("sin-anim"); ubicar(el, p); el.classList.remove("abajo"); el.style.opacity = 1; return; }
-    const demora = reparto ? orden * 160 : 0;
+    const demora = reparto && !p.plano ? orden * 170 : 0;
     el.getBoundingClientRect();
     el.classList.remove("sin-anim");
     el.style.transitionDelay = demora + "ms";
     requestAnimationFrame(() => {
       ubicar(el, p); el.style.opacity = 1;
-      if (reparto && nueva) { setTimeout(() => el.classList.remove("abajo"), demora + 480); S.roce(demora / 1000, 0.12, 0.05); }
-      else if (nueva && p.de !== undefined && p.de !== v.yo) { setTimeout(() => { el.classList.remove("abajo"); S.chasquido(0, 0.24); }, 160); S.golpe(0.45, 0.14); }
+      if (reparto && nueva && !p.plano) { setTimeout(() => el.classList.remove("abajo"), demora + 480); S.roce(demora / 1000, 0.12, 0.05); }
+      else if (nueva && p.plano) { S.roce(0, 0.12, 0.05); S.golpe(0.42, 0.16); }
       else el.classList.remove("abajo");
       setTimeout(() => (el.style.transitionDelay = "0ms"), demora + 20);
     });
   });
-  for (const e of eventos) if (e.t === "jugada" && e.jugador === v.yo) { S.roce(0, 0.15, 0.06); S.golpe(0.45, 0.14); }
 
-  renderEstado(v, m); renderNota(v); renderAcciones(v); renderGestos(v, m); renderTanteador(v);
+  renderEstado(v, m); renderNota(v); ubicarNota(m); renderAcciones(v); renderGestos(v, m); renderTanteador(v);
   clearTimeout(render.fin);
   if (v.fase === "fin_mano" || v.fase === "fin_partida") {
     const recien = eventos.some((e) => e.t === "fin_mano" || e.t === "fin_partida");
@@ -558,12 +619,33 @@ function render(eventos, sinAnim, reparto) {
   } else if ($("#capa").dataset.tipo === "fin") cerrarCapa();
 }
 
+function ubicarNota(m) {
+  const a = proyectar('.ancla[data-a="n"]'), el = $("#eq-bazas");
+  el.style.left = "auto"; el.style.right = Math.max(8, m.W - a.x) + "px";
+  el.style.top = (a.y - 4) + "px";
+}
+
 function renderAsientos(v, m) {
   const turnoDuelo = v.tipoMano === "punta" && v.duelos;
   v.nombres.forEach((nombre, j) => {
     const c = carasEl[j]; if (!c) return;
-    const p = lugarDe(j, v, m);
-    c.el.style.left = p.x + "px"; c.el.style.top = p.y + "px";
+    if (j === v.yo) {
+      const p = lugarDe(j, v, m);
+      c.el.style.left = p.x + "px"; c.el.style.top = p.y + "px";
+    } else {
+      // el busto se sienta detrás del borde de la mesa: la madera le tapa los hombros
+      const a = proyectar(`.ancla[data-a="${j}"]`), [u, w] = uvDe(j, v);
+      const k = w === 0 ? 0.2 : 0.3; // cuánto del busto tapa la mesa
+      let ancho = m.busto * Math.max(0.62, Math.min(1.1, a.s));
+      const altoMax = (a.y - m.top - 38) / (1 - k);   // el nombre no puede subirse a la barra
+      ancho = Math.max(48, Math.min(ancho, altoMax / 1.5));
+      const alto = ancho * 1.5;
+      const x = Math.min(m.W - ancho * 0.5 - 2, Math.max(ancho * 0.5 + 2, a.x + (u === 0 ? -ancho * 0.18 : u === 1 ? ancho * 0.18 : 0)));
+      const pie = a.y + alto * k;
+      c.svg.style.width = ancho + "px";
+      c.el.style.left = x + "px"; c.el.style.top = pie + "px";
+      posAsiento[j] = { x, y: pie - alto * 0.62, top: pie - alto - 30, h: alto };
+    }
     c.el.querySelector(".n").textContent = j === v.yo ? "vos" : nombre;
     const chips = [];
     if (v.mano === j && v.fase === "jugando") chips.push("mano");
@@ -571,7 +653,7 @@ function renderAsientos(v, m) {
     if (v.alMazo[j]) chips.push("al mazo");
     if (turnoDuelo && v.miDuelo?.contra === j) chips.push("tu duelo");
     c.el.querySelector(".chips").innerHTML = chips.map((t) => `<span class="mini-chip">${t}</span>`).join("");
-    c.el.querySelector(".quedan").innerHTML = j === v.yo ? "" : "<span></span>".repeat(v.alMazo[j] ? 0 : v.cartasEnMano[j]);
+    const q = c.el.querySelector(".quedan"); if (q) q.innerHTML = "<span></span>".repeat(v.alMazo[j] ? 0 : v.cartasEnMano[j]);
     c.el.classList.toggle("turno", v.fase === "jugando" && v.turno === j);
     c.el.classList.toggle("mazo", !!v.alMazo[j]);
     c.el.classList.toggle("apagado", !!turnoDuelo && j !== v.yo && v.miDuelo?.contra !== j);
@@ -706,7 +788,7 @@ function renderGestos(v, m) {
   if (bandeja === "pregunta") botones = K.PREGUNTAS.filter((q) => !q.soloFlor || v.flor).map((q) => [q.k, q.texto, ""]);
   band.innerHTML = `<p class="ayuda">${{ sena: "Tu cara la hace un instante. La ven todos.", cabeza: "Contestale a tu compañero con la cabeza.", pregunta: "Sos el pie: preguntale a tu equipo." }[bandeja]}</p>`
     + `<div class="botones">${botones.map(([k, t, sub]) => `<button class="b" data-k="${k}" title="${esc(sub)}">${esc(t)}</button>`).join("")}</div>`;
-  band.onclick = (e) => { const b = e.target.closest("[data-k]"); if (b) hacerGesto(bandeja, b.dataset.k); };
+  band.onclick = (e) => { const b = e.target.closest("[data-k]"); if (!b) return; hacerGesto(bandeja, b.dataset.k); bandeja = null; renderGestos(vista, medidas()); };
 }
 
 // ---------- cantos: voz y bocadillo junto a la cara ----------
@@ -742,7 +824,7 @@ function bocadillo(j, texto, pregunta = false) {
   el.textContent = texto;
   const x = Math.min(m.W - 90, Math.max(90, p.x));
   el.style.left = x + "px";
-  el.style.top = (p.y + (p.y < m.top + m.RH * 0.3 ? m.cara * 0.55 : -m.cara * 1.1)) + "px";
+  el.style.top = Math.max(m.top + 4, p.top) + "px";
   $("#eq-bocadillos").appendChild(el);
   setTimeout(() => el.remove(), 2400);
 }
