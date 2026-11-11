@@ -169,7 +169,7 @@ function puedeCantarFlor(s, j, respondiendoEnvido = false) {
   return respondiendoEnvido || (!s.envido && !jugoEnPrimera(s, j));
 }
 
-function subidasEnvido(cantos) {
+export function subidasEnvido(cantos) {
   const ultimo = cantos[cantos.length - 1].c;
   if (ultimo === "falta_envido") return [];
   const r = [];
@@ -192,12 +192,12 @@ function envidoQuerido(s, receptor) {
   return cantos.reduce((t, x) => t + VALOR_ENVIDO[x.c], 0);
 }
 
-function envidoNoQuerido(cantos) {
+export function envidoNoQuerido(cantos) {
   if (cantos.length === 1) return 1;
   return cantos.slice(0, -1).reduce((t, x) => t + VALOR_ENVIDO[x.c], 0);
 }
 
-function florNoQuerida(cantos) {
+export function florNoQuerida(cantos) {
   const ultimo = cantos[cantos.length - 1].c;
   if (ultimo === "contraflor_al_resto" && cantos[cantos.length - 2].c === "contraflor") return 6;
   return 4;
@@ -217,7 +217,7 @@ function puedeMostrarAlFinal(s, j) {
     && s.mazo !== j && !s.listos[j]; // si se fue al mazo o ya aceptó seguir, no puede
 }
 
-function ganadorPorBazas(bazas, mano) {
+export function ganadorPorBazas(bazas, mano) {
   const r = bazas.filter((b) => b.gana !== null).map((b) => b.gana);
   for (const j of [0, 1]) if (r.filter((x) => x === j).length >= 2) return j;
   if (r.length < 2) return null;
