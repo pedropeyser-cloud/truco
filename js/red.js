@@ -32,7 +32,7 @@ export function abrirSala(codigo, { alAbrir, alEntrar, alMensaje, alSalir, alErr
 }
 
 // invitado: se conecta a la sala y reintenta si se corta
-export function entrarSala(codigo, { alConectar, alMensaje, alCortar, alError }) {
+export function entrarSala(codigo, { alConectar, alMensaje, alCortar, alError, alLlamada }) {
   let peer, conn = null, cerrado = false, timer = null;
   const conectar = () => {
     if (cerrado) return;
@@ -46,12 +46,14 @@ export function entrarSala(codigo, { alConectar, alMensaje, alCortar, alError })
   peer.on("open", conectar);
   peer.on("disconnected", () => { try { peer.reconnect(); } catch {} });
   peer.on("error", e => { alError?.(e); if (e.type === "peer-unavailable" || e.type === "network" || e.type === "server-error") reintentar(); });
-  return { enviar: m => { if (conn?.open) conn.send(m); }, cerrar: () => { cerrado = true; peer.destroy(); } };
+  peer.on("call", c => alLlamada?.(c)); // audio del micrófono del pie, reenviado por el anfitrión
+  return { enviar: m => { if (conn?.open) conn.send(m); }, cerrar: () => { cerrado = true; peer.destroy(); },
+    llamar: (stream, metadata) => peer.call(PREFIJO + codigo, stream, { metadata }) };
 }
 
 // ---------- mesa de 4 o 6: el anfitrión recibe a varios invitados ----------
 // Cada invitado se identifica con un id propio (guardado en su navegador) para volver a su asiento si se corta.
-export function abrirSalaGrupo(codigo, maximo, { alAbrir, alEntrar, alMensaje, alSalir, alError }) {
+export function abrirSalaGrupo(codigo, maximo, { alAbrir, alEntrar, alMensaje, alSalir, alError, alLlamada }) {
   let peer, intentos = 0;
   const conns = new Map(); // conexión → id del invitado (null hasta el «hola»)
   const crear = () => {
@@ -82,6 +84,7 @@ export function abrirSalaGrupo(codigo, maximo, { alAbrir, alEntrar, alMensaje, a
       if (e.type === "unavailable-id" && intentos++ < 8) { peer.destroy(); setTimeout(crear, 2500); return; }
       alError?.(e);
     });
+    peer.on("call", c => alLlamada?.(String(c.metadata?.id || ""), c));
   };
   crear();
   const conDe = id => [...conns].find(([c, i]) => i === id && c.open)?.[0];
@@ -89,6 +92,7 @@ export function abrirSalaGrupo(codigo, maximo, { alAbrir, alEntrar, alMensaje, a
     enviar: (id, m) => { const c = conDe(id); if (c) c.send(m); },
     enviarTodos: m => { for (const [c, i] of conns) if (i && c.open) c.send(m); },
     conectados: () => [...new Set([...conns].filter(([c, i]) => i && c.open).map(([, i]) => i))],
+    llamarA: (id, stream) => { const c = conDe(id); return c ? peer.call(c.peer, stream, { metadata: { de: "anfitrion" } }) : null; },
     echar: id => { const c = conDe(id); if (c) { c.send({ t: "lleno" }); setTimeout(() => c.close(), 300); } },
     cerrar: () => peer.destroy(),
   };

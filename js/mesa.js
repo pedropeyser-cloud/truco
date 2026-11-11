@@ -92,11 +92,13 @@ function conectarAnfitrion() {
       guardar();
     },
     alError: (e) => { if (e.type !== "peer-unavailable") aviso("Problema de conexión: " + (e.type || e.message)); },
+    alLlamada: (id, call) => recibirLlamadaAnfitrion(id, call),
     alMensaje: (id, m) => {
       const j = asientos.findIndex((a) => a?.id === id);
       if (j < 0) return;
       if (m.t === "accion") hostAplicar(j, m.accion);
       else if (m.t === "gesto") registrarGesto(j, m.tipo, m.k);
+      else if (m.t === "voz") registrarVoz(j, !!m.on);
       else if (m.t === "revancha" && estado?.fase === "fin_partida") nuevaPartidaMismaMesa();
     },
   });
@@ -270,6 +272,67 @@ function glifo(j, txt) {
   c.el.appendChild(g); setTimeout(() => g.remove(), 1000);
 }
 
+// ---------------- micrófono del pie (mantener apretado) ----------------
+// El audio va del pie al anfitrión, y el anfitrión lo reenvía a los demás. Lo oyen todos, rivales incluidos.
+let micStream = null, hablando = false, misLlamadas = [];
+const audios = new Map(), reenvios = new Map(), llamadaDe = new Map();
+
+async function empezarHablar() {
+  if (hablando || !vista || vista.pies?.[vista.equipo] !== vista.yo || vista.tipoMano !== "redonda") return;
+  hablando = true; renderGestos(vista, medidas());
+  try {
+    micStream = micStream || await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch { hablando = false; renderGestos(vista, medidas()); return aviso("No pude usar el micrófono. Revisá el permiso del navegador."); }
+  if (!hablando) return; // soltó antes de que el navegador diera permiso
+  micStream.getAudioTracks().forEach((t) => (t.enabled = true));
+  if (modo === "invitado") { misLlamadas = [red.llamar(micStream, { id: miId() })].filter(Boolean); red.enviar({ t: "voz", on: true }); }
+  else { misLlamadas = asientos.filter((a) => a.tipo === "persona" && a.conectado).map((a) => red.llamarA(a.id, micStream)).filter(Boolean); registrarVoz(vista.yo, true); }
+}
+function terminarHablar() {
+  if (!hablando) return;
+  hablando = false;
+  misLlamadas.forEach((c) => { try { c.close(); } catch {} });
+  misLlamadas = [];
+  micStream?.getAudioTracks().forEach((t) => (t.enabled = false));
+  if (modo === "invitado") red.enviar({ t: "voz", on: false }); else if (estado) registrarVoz(vista.yo, false);
+  if (vista) renderGestos(vista, medidas());
+}
+document.addEventListener("pointerup", terminarHablar);
+document.addEventListener("pointercancel", terminarHablar);
+
+function recibirLlamadaAnfitrion(id, call) {
+  const j = asientos.findIndex((a) => a?.id === id);
+  const esPie = j >= 0 && estado?.fase === "jugando" && estado.tipoMano === "redonda" && E.pieDe(estado, E.equipoDe(j)) === j;
+  if (!esPie) { try { call.close(); } catch {} return; }
+  call.answer();
+  llamadaDe.get(id)?.close();
+  llamadaDe.set(id, call);
+  call.on("stream", (st) => {
+    sonar(call, st);
+    // reenvío a los demás invitados
+    reenvios.set(call, asientos.filter((a) => a.tipo === "persona" && a.conectado && a.id !== id).map((a) => red.llamarA(a.id, st)).filter(Boolean));
+  });
+  call.on("close", () => cortarLlamada(id, call));
+}
+function cortarLlamada(id, call) {
+  (reenvios.get(call) || []).forEach((c) => { try { c.close(); } catch {} });
+  reenvios.delete(call); callar(call);
+  if (llamadaDe.get(id) === call) llamadaDe.delete(id);
+}
+function sonar(call, st) {
+  S.desbloquear();
+  const a = new Audio(); a.srcObject = st; a.autoplay = true; a.play().catch(() => {});
+  audios.set(call, a);
+}
+function callar(call) { const a = audios.get(call); if (a) { a.pause(); a.srcObject = null; audios.delete(call); } }
+
+function registrarVoz(j, on) {
+  if (!on) { const id = asientos[j]?.id; const c = id && llamadaDe.get(id); if (c) { try { c.close(); } catch {} cortarLlamada(id, c); } }
+  red?.enviarTodos({ t: "voz", jugador: j, on });
+  marcarVoz(j, on);
+}
+function marcarVoz(j, on) { carasEl[j]?.el.classList.toggle("hablando", on); }
+
 // ================= INVITADO =================
 function entrarComoInvitado(sala) {
   if (!window.Peer) return aviso("No cargó la conexión. Revisá internet y recargá.");
@@ -284,9 +347,11 @@ function entrarComoInvitado(sala) {
       if (m.t === "lobby") lobbyInvitado(m);
       else if (m.t === "vista") { abrirJuego(); recibir(m.vista, Array.isArray(m.eventos) ? m.eventos : []); }
       else if (m.t === "gesto" && vista && m.jugador !== vista.yo) mostrarGesto(+m.jugador, String(m.tipo), String(m.k));
+      else if (m.t === "voz" && vista) marcarVoz(+m.jugador, !!m.on);
       else if (m.t === "lleno") { $("#txt-invitado").textContent = "La mesa ya está completa."; red.cerrar(); }
     },
     alCortar: () => { puntoRed(false); aviso("Se cortó la conexión. Reconectando…"); },
+    alLlamada: (call) => { call.answer(); call.on("stream", (st) => sonar(call, st)); call.on("close", () => callar(call)); },
     alError: (e) => { if (e.type === "peer-unavailable") { const t = "No encuentro la mesa. ¿El que te invitó tiene la pestaña abierta? Reintento solo."; if ($("#mesa-eq").hidden) $("#txt-invitado").textContent = t; else aviso(t); } },
   });
 }
@@ -776,8 +841,15 @@ function renderGestos(v, m) {
   cont.style.left = (p.x + m.cara * 0.62) + "px";
   cont.style.top = (p.y - 18) + "px";
   const pestañas = [["sena", "señas"], ["cabeza", "cabeza"], ...(soyPie ? [["pregunta", "preguntar"]] : [])];
+  const conMic = soyPie && modo !== "practica" && !!navigator.mediaDevices?.getUserMedia;
   if (bandeja === "pregunta" && !soyPie) bandeja = null;
-  cont.innerHTML = pestañas.map(([k, t]) => `<button class="pestana" data-g="${k}" aria-pressed="${bandeja === k}">${t}</button>`).join("");
+  cont.innerHTML = pestañas.map(([k, t]) => `<button class="pestana" data-g="${k}" aria-pressed="${bandeja === k}">${t}</button>`).join("")
+    + (conMic ? `<button class="pestana mic" data-mic aria-pressed="${hablando}" title="Mantené apretado para hablarle a la mesa">${hablando ? "hablando…" : "hablar"}</button>` : "");
+  const mic = cont.querySelector("[data-mic]");
+  if (mic) {
+    mic.onpointerdown = (e) => { e.preventDefault(); empezarHablar(); };
+    mic.oncontextmenu = (e) => e.preventDefault();
+  }
   cont.onclick = (e) => { const b = e.target.closest("[data-g]"); if (!b) return; bandeja = bandeja === b.dataset.g ? null : b.dataset.g; renderGestos(vista, medidas()); };
   if (!bandeja) { band.hidden = true; return; }
   band.hidden = false;
