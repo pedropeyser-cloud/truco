@@ -39,7 +39,9 @@ function iniciar() {
     const b = e.target.closest("button"); if (!b) return;
     for (const x of g.querySelectorAll("button")) x.setAttribute("aria-pressed", x === b);
   });
-  document.addEventListener("pointerdown", () => { S.desbloquear(); S.precargar(); }, { once: false, passive: true });
+  // en el celular el toque "vale" al levantar el dedo (pointerup/touchend/click), no al apoyarlo
+  for (const ev of ["pointerdown", "pointerup", "touchend", "click", "keydown"])
+    document.addEventListener(ev, () => { S.desbloquear(); S.precargar(); }, { passive: true, capture: true });
   S.cargarFrases();
 
   const sala = params.get("sala");
@@ -78,6 +80,9 @@ function mostrarEspera() {
   $("#bloque-crear").hidden = true; $("#bloque-invitado").hidden = true; $("#bloque-espera").hidden = false;
   $("#txt-link").textContent = linkDe(codigo);
   if (!navigator.share) $("#btn-compartir").hidden = true;
+  // probando en local: 127.0.0.1 en otro aparato es ese aparato, así que el link no le llega
+  if (/^(localhost|127\.|\[::1\])/.test(location.hostname))
+    aviso("Ojo: este link solo abre en esta compu. Para el celular, abrí la página con la IP de la PC (192.168…) o usá la versión publicada.", 9000);
 }
 function conectarAnfitrion() {
   red = abrirSala(codigo, {

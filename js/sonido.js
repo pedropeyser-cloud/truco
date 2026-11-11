@@ -6,11 +6,31 @@ export function setActivo(v) { activo = v; try { localStorage.setItem("truco-son
 export function estaActivo() { return activo; }
 try { activo = localStorage.getItem("truco-sonido") !== "0"; } catch {}
 
-// los navegadores del celular solo dejan sonar después de un toque
+// los navegadores del celular solo dejan sonar después de un toque, y solo cuentan ciertos eventos
+// (al levantar el dedo, no al apoyarlo). Además el iPhone en silencio calla el audio web:
+// "playback" (Safari 17+) o un <audio> mudo sonando lo pasan a la categoría de reproducción.
+let silencioso = null, primerDesbloqueo = true;
+function wavMudo() {
+  const n = 800, b = new ArrayBuffer(44 + n * 2), v = new DataView(b), s = (o, t) => [...t].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+  s(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); s(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 16000, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); s(36, "data"); v.setUint32(40, n * 2, true);
+  return URL.createObjectURL(new Blob([b], { type: "audio/wav" }));
+}
 export function desbloquear() {
   if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return; } }
-  if (ctx.state === "suspended") ctx.resume();
+  if (ctx.state !== "running") ctx.resume().catch(() => {});
+  if (primerDesbloqueo) {
+    primerDesbloqueo = false;
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch {}
+    // un instante de silencio por el contexto: en Safari viejo es lo que lo destraba
+    try { const s = ctx.createBufferSource(); s.buffer = ctx.createBuffer(1, 1, 22050); s.connect(ctx.destination); s.start(0); } catch {}
+  }
+  if (!navigator.audioSession && /iPhone|iPad|iPod/.test(navigator.userAgent) && (!silencioso || silencioso.paused)) {
+    try { silencioso ??= Object.assign(new Audio(wavMudo()), { loop: true, volume: 0.01 }); silencioso.setAttribute("playsinline", ""); silencioso.play().catch(() => {}); } catch {}
+  }
 }
+// al volver a la pestaña el celular suele dejar el audio suspendido o "interrumpido"
+document.addEventListener("visibilitychange", () => { if (!document.hidden && ctx && ctx.state !== "running") ctx.resume().catch(() => {}); });
 export async function cargarFrases() {
   try { frases = await (await fetch("audio/frases.json")).json(); } catch { frases = {}; }
 }
