@@ -50,13 +50,41 @@ export function frente(id) {
   cache.set(id, s);
   return s;
 }
-let _dorso;
-export function dorso() {
-  return _dorso ??= `<svg class="svg-carta" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-    <rect width="${W}" height="${H}" rx="30" fill="${C.dorso}"/>
+// dorsos: el de siempre y los de la pulpería (catalogo.js → DORSOS). Clave desconocida = el de siempre.
+const dorsos = new Map();
+let nDorso = 0;
+const DORSO_ARTE = {
+  clasico: () => `<rect width="${W}" height="${H}" rx="30" fill="${C.dorso}"/>
     <rect x="26" y="26" width="${W - 52}" height="${H - 52}" rx="20" stroke="${C.ambar}" stroke-width="4" fill="none"/>
     <g transform="translate(300,430) scale(3.83)">${sol(C.ambar, 9 / 3.83)}</g>
-    <text x="54" y="${H - 58}" font-family="Caveat, cursive" font-size="54" fill="${C.ambar}" fill-opacity=".85">truco</text></svg>`;
+    <text x="54" y="${H - 58}" font-family="Caveat, cursive" font-size="54" fill="${C.ambar}" fill-opacity=".85">truco</text>`,
+  rayado: () => `<defs><pattern id="d-ray__U__" width="56" height="56" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="56" height="56" fill="${C.dorso}"/><rect width="22" height="56" fill="${C.ambar}" fill-opacity=".85"/></pattern></defs>
+    <rect width="${W}" height="${H}" rx="30" fill="url(#d-ray__U__)"/>
+    <rect x="26" y="26" width="${W - 52}" height="${H - 52}" rx="20" stroke="${C.papel}" stroke-width="5" fill="none"/>
+    <circle cx="300" cy="430" r="150" fill="${C.dorso}" stroke="${C.papel}" stroke-width="5"/>
+    <g transform="translate(300,430) scale(2.6)">${sol(C.ambar, 9 / 2.6)}</g>`,
+  luna: () => `<rect width="${W}" height="${H}" rx="30" fill="#18213a"/>
+    <rect x="26" y="26" width="${W - 52}" height="${H - 52}" rx="20" stroke="#e8c35a" stroke-width="4" fill="none" stroke-dasharray="2 14" stroke-linecap="round"/>
+    <circle cx="300" cy="400" r="150" fill="#f3e3b0"/><circle cx="360" cy="360" r="130" fill="#18213a"/>
+    ${[[130, 170, 10], [460, 200, 7], [470, 640, 11], [150, 690, 7], [220, 560, 5], [420, 520, 6], [300, 140, 6]].map(([x, y, r]) => `<path d="M${x} ${y - r * 2}L${x + r * .5} ${y - r * .5}L${x + r * 2} ${y}L${x + r * .5} ${y + r * .5}L${x} ${y + r * 2}L${x - r * .5} ${y + r * .5}L${x - r * 2} ${y}L${x - r * .5} ${y - r * .5}Z" fill="#f3e3b0"/>`).join("")}
+    <text x="54" y="${H - 58}" font-family="Caveat, cursive" font-size="54" fill="#f3e3b0" fill-opacity=".85">truco</text>`,
+  celeste: () => `<clipPath id="d-cel__U__"><rect width="${W}" height="${H}" rx="30"/></clipPath>
+    <g clip-path="url(#d-cel__U__)"><rect width="${W}" height="${H}" fill="#f4f6fb"/><rect width="${W}" height="${H / 3}" fill="#7cc4ef"/><rect y="${H * 2 / 3}" width="${W}" height="${H / 3}" fill="#7cc4ef"/></g>
+    <rect x="26" y="26" width="${W - 52}" height="${H - 52}" rx="20" stroke="${C.tinta}" stroke-width="4" fill="none"/>
+    <g transform="translate(300,430) scale(2.4)"><circle r="26" fill="#f2c230"/>${sol("#b8862b", 9 / 2.4)}</g>`,
+  oro: () => `<defs><linearGradient id="d-oro__U__" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f4d77a"/><stop offset=".5" stop-color="#e0b443"/><stop offset="1" stop-color="#a87a1f"/></linearGradient></defs>
+    <rect width="${W}" height="${H}" rx="30" fill="url(#d-oro__U__)"/>
+    <rect x="26" y="26" width="${W - 52}" height="${H - 52}" rx="20" stroke="${C.tinta}" stroke-width="5" fill="none"/>
+    <rect x="44" y="44" width="${W - 88}" height="${H - 88}" rx="14" stroke="${C.tinta}" stroke-width="2" fill="none" opacity=".5"/>
+    <g transform="translate(300,430) scale(3.83)">${sol(C.tinta, 9 / 3.83)}</g>
+    <text x="54" y="${H - 58}" font-family="Caveat, cursive" font-size="54" fill="${C.tinta}">truco</text>`,
+};
+export function dorso(k = "clasico") {
+  if (!DORSO_ARTE[k]) k = "clasico";
+  if (!dorsos.has(k)) dorsos.set(k, `<svg class="svg-carta" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${DORSO_ARTE[k]()}</svg>`);
+  // cada copia con sus propios ids: un patrón que vive en una pantalla oculta no se pinta en las demás
+  const s = dorsos.get(k);
+  return s.includes("__U__") ? s.replaceAll("__U__", "-" + ++nDorso) : s;
 }
 export const MAZO = (() => {
   const ids = [];

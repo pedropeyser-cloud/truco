@@ -18,6 +18,7 @@
 <link rel="stylesheet" href="css/estilo.css">
 <link rel="stylesheet" href="css/mesa.css">
 <link rel="stylesheet" href="css/perfil.css">
+<link rel="stylesheet" href="css/pulperia.css">
 <script src="js/vendor/peerjs.min.js" defer></script>
 <script src="js/vendor/supabase.js" defer></script>
 <script type="module" src="js/app.js"></script>
@@ -26,48 +27,59 @@
 <div class="grano" aria-hidden="true"></div>
 
 <section id="inicio" class="pantalla inicio">
-  <div class="inicio-cartas" aria-hidden="true"><div class="ic ic1"></div><div class="ic ic2"></div></div>
-  <h1>truco</h1>
-  <p class="mano-sub">el barajador reparte</p>
+ <header id="cabecera" class="cabecera" hidden></header>
+
+ <div id="vista-jugar" class="vista" data-vista="jugar">
+  <div class="heroe">
+    <div class="inicio-cartas" aria-hidden="true"><div class="ic ic1"></div><div class="ic ic2"></div></div>
+    <h1>truco</h1>
+    <p class="mano-sub">el barajador reparte</p>
+  </div>
 
   <div id="bloque-cuenta" class="cuenta" hidden></div>
 
   <div id="bloque-crear" class="bloque">
-    <label class="campo"><span>Tu nombre</span><input id="in-nombre" type="text" maxlength="16" autocomplete="nickname" placeholder="Cómo te ven en la mesa"></label>
-    <div class="campo"><span>Jugadores</span>
-      <div class="segmentado tres" role="group" aria-label="Cantidad de jugadores">
-        <button type="button" data-jug="2" aria-pressed="true">de a 2 <small>mano a mano</small></button>
-        <button type="button" data-jug="4" aria-pressed="false">de a 4 <small>2 contra 2</small></button>
-        <button type="button" data-jug="6" aria-pressed="false">de a 6 <small>3 contra 3</small></button>
+    <label class="campo" id="campo-nombre"><span>Tu nombre</span><input id="in-nombre" type="text" maxlength="16" autocomplete="nickname" placeholder="Cómo te ven en la mesa"></label>
+    <div class="campo"><span>¿De a cuántos?</span>
+      <div class="segmentado tres modos-jug" role="group" aria-label="Cantidad de jugadores">
+        <button type="button" data-jug="2" aria-pressed="true"><i class="sillas s2" aria-hidden="true"><b></b><b></b></i>mano a mano <small>de a 2</small></button>
+        <button type="button" data-jug="4" aria-pressed="false"><i class="sillas s4" aria-hidden="true"><b></b><b></b><b></b><b></b></i>2 contra 2 <small>de a 4</small></button>
+        <button type="button" data-jug="6" aria-pressed="false"><i class="sillas s6" aria-hidden="true"><b></b><b></b><b></b><b></b><b></b><b></b></i>3 contra 3 <small>de a 6</small></button>
       </div>
     </div>
-    <div class="campo"><span>Partida</span>
-      <div class="segmentado" role="group" aria-label="Puntos de la partida">
-        <button type="button" data-meta="15" aria-pressed="true">a 15</button>
-        <button type="button" data-meta="30" aria-pressed="false">a 30 <small>malas y buenas</small></button>
+    <details class="ajustes" id="ajustes">
+      <summary><span class="aj-t">Reglas de la mesa</span><span class="aj-r" id="ajustes-resumen">a 15 · sin flor · bots normal</span></summary>
+      <div class="aj-cuerpo">
+        <div class="campo"><span>Partida</span>
+          <div class="segmentado" role="group" aria-label="Puntos de la partida">
+            <button type="button" data-meta="15" aria-pressed="true">a 15</button>
+            <button type="button" data-meta="30" aria-pressed="false">a 30 <small>malas y buenas</small></button>
+          </div>
+        </div>
+        <div class="campo"><span>Flor</span>
+          <div class="segmentado" role="group" aria-label="Jugar con flor">
+            <button type="button" data-flor="0" aria-pressed="true">sin flor</button>
+            <button type="button" data-flor="1" aria-pressed="false">con flor</button>
+          </div>
+        </div>
+        <div class="campo" id="campo-punta" hidden><span>Punta y hacha</span>
+          <div class="segmentado" role="group" aria-label="Jugar con punta y hacha">
+            <button type="button" data-punta="0" aria-pressed="true">sin punta y hacha</button>
+            <button type="button" data-punta="1" aria-pressed="false">con punta y hacha <small>a mitad de partida, duelos</small></button>
+          </div>
+        </div>
+        <div class="campo"><span>Bots</span>
+          <div class="segmentado tres" role="group" aria-label="Dificultad de los bots">
+            <button type="button" data-nivel="facil" aria-pressed="false">fácil</button>
+            <button type="button" data-nivel="normal" aria-pressed="true">normal</button>
+            <button type="button" data-nivel="dificil" aria-pressed="false">difícil <small>lee las señas</small></button>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="campo"><span>Flor</span>
-      <div class="segmentado" role="group" aria-label="Jugar con flor">
-        <button type="button" data-flor="0" aria-pressed="true">sin flor</button>
-        <button type="button" data-flor="1" aria-pressed="false">con flor</button>
-      </div>
-    </div>
-    <div class="campo" id="campo-punta" hidden><span>Punta y hacha</span>
-      <div class="segmentado" role="group" aria-label="Jugar con punta y hacha">
-        <button type="button" data-punta="0" aria-pressed="true">sin punta y hacha</button>
-        <button type="button" data-punta="1" aria-pressed="false">con punta y hacha <small>a mitad de partida, duelos</small></button>
-      </div>
-    </div>
-    <div class="campo"><span>Bots</span>
-      <div class="segmentado tres" role="group" aria-label="Dificultad de los bots">
-        <button type="button" data-nivel="facil" aria-pressed="false">fácil</button>
-        <button type="button" data-nivel="normal" aria-pressed="true">normal</button>
-        <button type="button" data-nivel="dificil" aria-pressed="false">difícil <small>lee las señas</small></button>
-      </div>
-    </div>
-    <button id="btn-crear" class="b fuerte ancho">Invitar a alguien</button>
-    <button id="btn-practica" class="b ancho">Practicar contra la máquina</button>
+    </details>
+    <button id="btn-crear" class="b fuerte ancho grande"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg><span>Invitar a alguien</span></button>
+    <button id="btn-practica" class="b ancho"><span>Practicar contra la máquina</span></button>
+    <div id="bloque-conectados"></div>
   </div>
 
   <div id="bloque-espera" class="bloque" hidden>
@@ -103,12 +115,27 @@
     <button id="btn-entrar" class="b fuerte ancho">Sentarme a la mesa</button>
     <p id="txt-invitado" class="espera"></p>
   </div>
+ </div>
+
+ <div id="vista-pulperia" class="vista ancha" data-vista="pulperia" hidden></div>
+ <div id="vista-liga" class="vista" data-vista="liga" hidden></div>
+ <div id="vista-partidas" class="vista" data-vista="partidas" hidden></div>
+ <div id="vista-vos" class="vista" data-vista="vos" hidden></div>
+
+ <nav id="pestanas" class="pestanas" aria-label="Secciones" hidden>
+  <button type="button" data-ir="jugar" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="9" height="13" rx="1.8" transform="rotate(-10 8 11.5)"/><rect x="11" y="5" width="9" height="13" rx="1.8" transform="rotate(10 15.5 11.5)"/></svg><span>Jugar</span></button>
+  <button type="button" data-ir="pulperia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l2-5h14l2 5"/><path d="M3 9c0 1.7 1.3 3 3 3s3-1.3 3-3c0 1.7 1.3 3 3 3s3-1.3 3-3c0 1.7 1.3 3 3 3s3-1.3 3-3"/><path d="M5 12v8h14v-8M10 20v-5h4v5"/></svg><span>Pulpería</span><i class="globo" hidden></i></button>
+  <button type="button" data-ir="liga"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z"/><path d="M12 8l1.5 3 3 .4-2.2 2.1.5 3-2.8-1.5-2.8 1.5.5-3-2.2-2.1 3-.4z"/></svg><span>Liga</span></button>
+  <button type="button" data-ir="partidas"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h10l3 3v15H6z"/><path d="M9 9h7M9 13h7M9 17h4"/></svg><span>Partidas</span></button>
+  <button type="button" data-ir="vos"><span class="tab-cara" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="9" r="4.5"/><path d="M4 21c1-4.5 4.5-6.5 8-6.5s7 2 8 6.5"/></svg></span><span>Vos</span></button>
+ </nav>
 </section>
 
 <section id="juego" class="pantalla juego" hidden>
   <header class="barra">
     <div class="rival">
       <span class="punto-red" id="punto-red" title="conexión"></span>
+      <span id="cara-rival" class="cara-rival" aria-hidden="true"></span>
       <span id="nombre-rival" class="nombre"></span>
       <span id="chip-rival" class="chip" hidden>mano</span>
       <span id="cara-a-cara" class="cara-a-cara" hidden></span>

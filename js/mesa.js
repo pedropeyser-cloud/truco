@@ -12,6 +12,7 @@ import * as K from "./caras.js";
 import { selectorTanto, liderDicho } from "./tanto.js";
 import * as Perfil from "./perfil.js";
 import * as G from "./gloria.js";
+import * as C from "./catalogo.js";
 
 const $ = (s) => document.querySelector(s);
 const RATIO = 860 / 600;
@@ -597,7 +598,7 @@ function armarEscena() {
   if ($("#eq-escena")) return;
   const e3 = document.createElement("div");
   e3.id = "eq-escena"; e3.className = "escena";
-  e3.innerHTML = '<div id="eq-tablero" class="tablero"><div class="canto"></div><div class="ancla" data-a="c"></div></div>';
+  e3.innerHTML = `<div id="eq-tablero" class="tablero pano-${Perfil.miPano()}"><div class="canto"></div><div class="ancla" data-a="c"></div></div>`;
   $("#eq-mesa").appendChild(e3);
 }
 function layoutTablero(v, m) {
@@ -657,13 +658,14 @@ function armarAsientos(v) {
     const lado = !yo && [0, 1].includes(uvDe(j, v)[0]);
     el.className = "asiento " + (nos ? "nos" : "ellos") + (yo ? " yo" : " busto") + (lado ? " lado" : "");
     el.dataset.j = j;
-    const cara = K.cara(j, yo ? "tu cara" : `${esc(v.nombres[j])}, ${nos ? "de tu equipo" : "rival"}`, yo ? {} : { busto: true, color: nos ? "#f0a93b" : "#5b616c" });
+    const etq = yo ? "tu cara" : `${esc(v.nombres[j])}, ${nos ? "de tu equipo" : "rival"}`, ops = yo ? {} : { busto: true, color: nos ? "#f0a93b" : "#5b616c" };
+    const cara = K.cara(j, etq, ops);
     el.innerHTML = yo ? cara + '<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div>'
       : '<div class="etq"><i></i><span class="n"></span></div><div class="chips"></div><div class="quedan"></div>' + cara;
     // los de enfrente se sientan detrás del borde lejano; los de los costados, sobre el borde (nada les tapa la cara)
     (yo || lado ? $("#eq-mesa") : $("#eq-asientos")).appendChild(el);
     const svg = el.querySelector("svg");
-    carasEl.push({ el, svg, parar: K.parpadear(svg) });
+    carasEl.push({ el, svg, parar: K.parpadear(svg), etq, ops, forma: j });
   }
 }
 
@@ -718,7 +720,7 @@ const giroDe = (id) => { let h = 0; for (const c of id) h = (h * 31 + c.charCode
 function crearCarta(key, id, plano) {
   const el = document.createElement("div");
   el.className = "carta sin-anim" + (plano ? " en-mesa" : " abajo"); el.dataset.key = key;
-  el.innerHTML = `<div class="giro"><div class="cara frente">${id ? frente(id) : ""}</div><div class="cara dorso">${dorso()}</div></div>`;
+  el.innerHTML = `<div class="giro"><div class="cara frente">${id ? frente(id) : ""}</div><div class="cara dorso">${dorso(Perfil.miDorso())}</div></div>`;
   if (!plano) el.addEventListener("click", () => tocarCarta(el));
   (plano ? $("#eq-tablero") : $("#eq-mesa")).appendChild(el); cartasEl.set(key, el);
   return el;
@@ -837,8 +839,18 @@ function renderAsientos(v, m) {
     }
     const pj = perfilesMesa[j];
     if (pj && j !== v.yo) c.el.querySelector(".n").innerHTML = Perfil.nombreHTML(pj, { titulo: true }); else c.el.querySelector(".n").textContent = j === v.yo ? "vos" : nombre;
-    const acc = G.accesoriosDe(pj, enClasif), clave = JSON.stringify(acc);
-    if (c.acc !== clave) { c.acc = clave; K.accesorios(c.svg, acc, { gorra: G.gorra, peluca: G.peluca }); }
+    // la cara de cada uno: la que eligió en la pulpería (o la del asiento) con lo que tiene puesto
+    const forma = pj ? Perfil.formaDe(pj, j) : j;
+    const acc = Perfil.accDe(pj, enClasif), clave = JSON.stringify([forma, acc]);
+    if (c.acc !== clave) {
+      c.acc = clave;
+      if (c.forma !== forma) {
+        const d = document.createElement("div"); d.innerHTML = K.cara(forma, c.etq, c.ops);
+        const nuevo = d.firstElementChild; nuevo.style.width = c.svg.style.width;
+        c.parar(); c.svg.replaceWith(nuevo); c.svg = nuevo; c.parar = K.parpadear(nuevo); c.forma = forma;
+      }
+      K.accesorios(c.svg, acc, Perfil.DIBUJOS);
+    }
     const chips = [];
     if (v.mano === j && v.fase === "jugando") chips.push("mano");
     if (v.tipoMano === "redonda" && v.pies?.includes(j) && v.fase === "jugando") chips.push("pie");
@@ -1058,6 +1070,7 @@ function pulsoLampara() {
 
 // ---------- tanteador y hojas ----------
 function fosforos(p, meta, s = 22, gap = 10) {
+  if (Perfil.misPorotos()) return C.porotos(p, meta, s, gap); // de la pulpería: porotos en vez de fósforos
   const grupos = meta / 5, alto = grupos * (s + gap) + (meta === 30 ? 16 : 0), w = s + 12;
   let svg = `<svg viewBox="-6 -4 ${w} ${alto + 4}" width="${w}" height="${alto + 4}" aria-hidden="true">`;
   const lados = [[0, 0, 0, 1], [0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 1, 1]];

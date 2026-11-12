@@ -152,10 +152,24 @@ export function parpadear(svg) {
  * (detrás de la cabeza: asoma arriba y a los costados). Se mueven con la cabeza al asentir o negar.
  * acc: { gorra: bool, peluca: "#rrggbb" | null }. El dibujo lo da gloria.js.
  */
-export function accesorios(svg, acc, { gorra, peluca }) {
+export function accesorios(svg, acc, { gorra, peluca, sombreros = {}, ojos = {}, bocas = {} }) {
   const cab = svg?.querySelector(".cabeza");
   if (!cab) return;
   cab.querySelectorAll(".acc").forEach((x) => x.remove());
   if (acc?.peluca) cab.insertAdjacentHTML("afterbegin", peluca(acc.peluca));
-  if (acc?.gorra) cab.insertAdjacentHTML("beforeend", gorra());
+  // de la pulpería: bigote y anteojos sobre los rasgos; un solo sombrero (el elegido le gana a la gorrita)
+  if (acc?.boca && bocas[acc.boca]) cab.insertAdjacentHTML("beforeend", bocas[acc.boca]());
+  if (acc?.ojos && ojos[acc.ojos]) cab.insertAdjacentHTML("beforeend", ojos[acc.ojos]());
+  if (acc?.sombrero && sombreros[acc.sombrero]) cab.insertAdjacentHTML("beforeend", sombreros[acc.sombrero]());
+  else if (acc?.gorra) cab.insertAdjacentHTML("beforeend", gorra());
+}
+
+/** La cara como texto, ya con lo puesto (para la pulpería, la cabecera y el perfil). overflow visible: el sombrero asoma. */
+export function caraCon(forma, acc, dibujos, etiqueta = "cara") {
+  const d = document.createElement("div");
+  d.innerHTML = cara(forma, etiqueta);
+  const s = d.firstElementChild;
+  accesorios(s, acc || {}, dibujos);
+  s.setAttribute("viewBox", "0 -30 200 240");
+  return s.outerHTML;
 }

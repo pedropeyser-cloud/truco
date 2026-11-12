@@ -10,6 +10,8 @@ import { abrirSala, entrarSala, codigoNuevo, linkDe } from "./red.js";
 import * as Mesa from "./mesa.js"; // mesas de 4 y 6 (2 contra 2, 3 contra 3)
 import * as Perfil from "./perfil.js"; // cuenta con Google, historial, conectados (tanda 4B)
 import * as G from "./gloria.js";     // lo que se desbloquea con la gloria (4C) y la clasificatoria (4D)
+import * as C from "./catalogo.js";  // la pulpería: dorsos, paños, porotos, pinta de la cara
+import * as K from "./caras.js";
 import { azarDe } from "./bot-equipos.js";
 
 const $ = s => document.querySelector(s);
@@ -48,9 +50,11 @@ function iniciar() {
     for (const x of g.querySelectorAll("button")) x.setAttribute("aria-pressed", x === b);
     const enEquipo = jugadoresElegidos() > 2;
     $("#campo-punta").hidden = !enEquipo;
-    $("#btn-crear").textContent = enEquipo ? "Armar la mesa" : "Invitar a alguien";
-    $("#btn-practica").textContent = enEquipo ? "Practicar con bots" : "Practicar contra la máquina";
+    $("#btn-crear span").textContent = enEquipo ? "Armar la mesa" : "Invitar a alguien";
+    $("#btn-practica span").textContent = enEquipo ? "Practicar con bots" : "Practicar contra la máquina";
+    resumirAjustes();
   });
+  resumirAjustes();
   // en el celular el toque "vale" al levantar el dedo (pointerup/touchend/click), no al apoyarlo
   for (const ev of ["pointerdown", "pointerup", "touchend", "click", "keydown"])
     document.addEventListener(ev, () => { S.desbloquear(); S.precargar(); }, { passive: true, capture: true });
@@ -78,6 +82,15 @@ function leerForm() {
   return { nombre, meta: +document.querySelector("[data-meta][aria-pressed=true]").dataset.meta, flor: document.querySelector("[data-flor][aria-pressed=true]").dataset.flor === "1",
     dificultad: document.querySelector("[data-nivel][aria-pressed=true]")?.dataset.nivel || "normal",
     jugadores: jugadoresElegidos(), puntaYHacha: jugadoresElegidos() > 2 && document.querySelector("[data-punta][aria-pressed=true]")?.dataset.punta === "1" };
+}
+/** «Reglas de la mesa» cerrado muestra lo elegido en una línea. */
+function resumirAjustes() {
+  const el = $("#ajustes-resumen"); if (!el) return;
+  const sel = (a) => document.querySelector(`[data-${a}][aria-pressed=true]`)?.dataset[a];
+  const partes = [`a ${sel("meta") || 15}`, sel("flor") === "1" ? "con flor" : "sin flor"];
+  if (jugadoresElegidos() > 2 && sel("punta") === "1") partes.push("punta y hacha");
+  partes.push(`bots ${({ facil: "fácil", normal: "normal", dificil: "difícil" })[sel("nivel") || "normal"]}`);
+  el.textContent = partes.join(" · ");
 }
 function jugadoresElegidos() { return +(document.querySelector("[data-jug][aria-pressed=true]")?.dataset.jug || 2); }
 
@@ -355,7 +368,9 @@ function posiciones(v, m) {
 function crearCarta(key, id) {
   const el = document.createElement("div");
   el.className = "carta abajo sin-anim"; el.dataset.key = key;
-  el.innerHTML = `<div class="giro"><div class="cara frente">${id ? frente(id) : ""}</div><div class="cara dorso">${dorso()}</div></div>`;
+  // el dorso es el de quien tiene la carta: el rival ve el tuyo, vos ves el suyo
+  const d = String(key).startsWith("r") ? C.dorsoDe(perfiles1v1[rv()]) : Perfil.miDorso();
+  el.innerHTML = `<div class="giro"><div class="cara frente">${id ? frente(id) : ""}</div><div class="cara dorso">${dorso(d)}</div></div>`;
   el.addEventListener("click", () => tocarCarta(el));
   $("#mesa").appendChild(el); cartasEl.set(key, el);
   return el;
@@ -374,10 +389,28 @@ function tocarCarta(el) {
   else { elegida = id; S.roce(0, 0.1, 0.05); render([], false); }
 }
 
+/** La mesa del 1 contra 1: el paño (el tuyo, de la pulpería) entre la mano del rival y la tuya. */
+function renderPano(m) {
+  let p = $("#pano1");
+  if (!p) { p = document.createElement("div"); p.id = "pano1"; p.setAttribute("aria-hidden", "true"); $("#mesa").prepend(p); }
+  p.className = "pano1 pano-" + Perfil.miPano();
+  const w = Math.min(m.W - 20, 600), top = m.rivalY - m.rh * 0.15, bot = m.manoY - m.ch * 0.12;
+  Object.assign(p.style, { left: (m.W - w) / 2 + "px", width: w + "px", top: top + "px", height: Math.max(80, bot - top) + "px" });
+}
+/** La cara del rival en la barra, con su pinta (en práctica, la del Barajador). */
+function renderCaraRival(pr) {
+  const el = $("#cara-rival"); if (!el) return;
+  const clave = pr ? JSON.stringify([pr.id, pr.estilo, pr.puntos, enClasif]) : "bot";
+  if (el.dataset.clave === clave) return;
+  el.dataset.clave = clave;
+  el.innerHTML = K.caraCon(pr ? C.formaDe(pr) : 4, pr ? Perfil.accDe(pr, enClasif) : {}, Perfil.DIBUJOS, "tu rival");
+  el.classList.toggle("marco", !!pr && C.tieneMarco(pr));
+}
 function render(eventos, sinAnim, reparto) {
   const v = vista, m = medidas();
   const pr = perfiles1v1[rv()];
   if (pr) $("#nombre-rival").innerHTML = Perfil.nombreHTML(pr, { titulo: true }); else $("#nombre-rival").textContent = v.nombres[rv()];
+  renderCaraRival(pr); renderPano(m);
   const ac = G.accesoriosDe(pr, enClasif), po = v.poderes || {};
   $("#poderes-rival").innerHTML = (ac.gorra ? G.gorraMini() : "") + (ac.peluca ? `<span class="pelu-dot" style="background:${ac.peluca}" title="peluca"></span>` : "")
     + (po.peluca?.[rv()] > 0 ? '<span class="mini-chip">peluca</span>' : "") + (po.trampa?.[rv()] > 0 ? '<span class="mini-chip">trampa</span>' : "");
@@ -461,7 +494,7 @@ async function juntarYMezclar() {
   const pila = [];
   for (let j = 0; j < 10; j++) {
     const el = document.createElement("div"); el.className = "carta abajo sin-anim";
-    el.innerHTML = `<div class="giro"><div class="cara frente"></div><div class="cara dorso">${dorso()}</div></div>`;
+    el.innerHTML = `<div class="giro"><div class="cara frente"></div><div class="cara dorso">${dorso(Perfil.miDorso())}</div></div>`;
     ubicar(el, { x: m.cx, y: m.mesaY - j * 1.5, w: m.tw, r: 0, z: 70 + j }); mesa.appendChild(el); pila.push(el);
   }
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) { await espera(300); pila.forEach(e => e.remove()); return; }
@@ -595,6 +628,7 @@ function pulsoLampara() {
 
 // ---------- tanteador con fósforos (cuadrado de cuatro y uno cruzado = 5) ----------
 function fosforos(p, meta, s = 22, gap = 10) {
+  if (Perfil.misPorotos()) return C.porotos(p, meta, s, gap); // de la pulpería: porotos en vez de fósforos
   const grupos = meta / 5, alto = grupos * (s + gap) + (meta === 30 ? 16 : 0), w = s + 12;
   let svg = `<svg viewBox="-6 -4 ${w} ${alto + 4}" width="${w}" height="${alto + 4}" aria-hidden="true">`;
   const lados = [[0, 0, 0, 1], [0, 0, 1, 0], [1, 0, 1, 1], [0, 1, 1, 1], [0, 0, 1, 1]];
