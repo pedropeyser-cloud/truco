@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#14171c">
+<title>Truco · privacidad</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-50 -50 100 100'%3E%3Crect x='-50' y='-50' width='100' height='100' rx='18' fill='%231e222a'/%3E%3Ccircle r='14' stroke='%23f0a93b' stroke-width='5' fill='none'/%3E%3Ccircle r='3' fill='%23f0a93b'/%3E%3C/svg%3E">
+<style>
+  @font-face { font-family: Bricolage; src: url(fuentes/BricolageGrotesque.ttf); font-weight: 200 800; font-display: swap; }
+  @font-face { font-family: Caveat; src: url(fuentes/Caveat.ttf); font-weight: 400 700; font-display: swap; }
+  :root { --noche: #14171c; --papel: #ebe4d4; --ambar: #f0a93b; --gris: #8d919a; --linea: #353b46; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--noche); color: var(--papel); font: 17px/1.55 Bricolage, system-ui, sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 40px 16px 64px; }
+  h1 { font-weight: 500; font-size: 44px; margin: 0; line-height: 1.05; }
+  .sub { font-family: Caveat; color: var(--ambar); font-size: 24px; margin: 4px 0 28px; }
+  h2 { font-size: 20px; font-weight: 600; margin: 30px 0 6px; }
+  p, li { color: #d8d2c4; }
+  ul { padding-left: 20px; }
+  a { color: var(--ambar); }
+  .pie { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--linea); font-size: 14px; color: var(--gris); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacidad</h1>
+  <p class="sub">qué guarda el truco y para qué</p>
+
+  <p>El truco se juega sin cuenta. Si entrás con Google, el juego guarda lo mínimo para que tengas perfil, historial y puntos. No hay publicidad y no se vende ni se comparte nada con nadie.</p>
+
+  <h2>Qué se guarda si entrás con Google</h2>
+  <ul>
+    <li>De tu cuenta de Google: el correo y el nombre, solo para identificarte al entrar. Tu correo no se le muestra a los demás jugadores.</li>
+    <li>El usuario que elegís y lo que armás en tu perfil: título, color, letra y objetos.</li>
+    <li>Tus partidas: contra quién jugaste, el resultado, la gloria y los puntos de la clasificatoria.</li>
+    <li>Los equipos que armás o a los que te sumás, y las invitaciones a una mesa.</li>
+    <li>Cuándo estuviste conectado por última vez, para que tus amigos vean si estás para invitarte.</li>
+  </ul>
+
+  <h2>Quién lo ve</h2>
+  <p>Los demás jugadores con cuenta ven tu usuario, tu perfil, tus partidas y si estás conectado. Las invitaciones las ven solo quien las manda y quien las recibe.</p>
+
+  <h2>Dónde está</h2>
+  <p>Los datos se guardan en Supabase, un servicio de base de datos. Las partidas en sí van directo de navegador a navegador y no se guardan, salvo el resultado al terminar.</p>
+
+  <h2>Borrar tus datos</h2>
+  <p>Podés pedir que se borre tu cuenta y todo lo asociado escribiendo al correo de contacto que muestra Google en la pantalla de ingreso. Se borra en pocos días.</p>
+
+  <p class="pie">Truco · el barajador reparte · <a href="./">volver al juego</a></p>
+</main>
+</body>
+</html>
