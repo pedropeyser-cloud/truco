@@ -365,3 +365,10 @@ section.conectados .vacio { min-height: 0; padding: 4px 0 10px; }
 /* entrando a una mesa (invitado, esperando, sala de espera): nada de la pulpería en el medio */
 #vista-jugar:has(#bloque-crear[hidden]) .aviso-pul { display: none; }
 #bloque-invitado .guia { font-size: 24px; font-weight: 700; color: var(--papel); }
+
+/* pestañas y pantallas bloqueadas hasta juntar la gloria */
+.pestanas button.bloq > span:not(.globo) { opacity: .6; }
+.pestanas button.bloq::after { content: ""; position: absolute; top: 4px; left: calc(50% + 4px); width: 12px; height: 12px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='5' y='10' width='14' height='10' rx='2' fill='%238d919a'/%3E%3Cpath d='M8 10V7a4 4 0 0 1 8 0v3' fill='none' stroke='%238d919a' stroke-width='2.6'/%3E%3C/svg%3E") center / contain no-repeat; }
+.sol-cerrado { color: var(--gris); opacity: .5; height: 110px; display: grid; place-items: center; }
+.pestanas button.bloq[aria-current] > span:not(.globo) { opacity: 1; }

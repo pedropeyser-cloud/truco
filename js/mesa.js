@@ -237,26 +237,54 @@ async function anotarMesa() {
 }
 
 // ---------------- bots ----------------
-function programarBots() {
+const botDesde = new Map(); // j → cuándo empezó a esperar su turno (para no esperar a un compañero para siempre)
+/** ¿Hay una persona de su equipo que puede estar por hacerle una seña o una pregunta? */
+function hayHumanoEnEquipo(j) {
+  const eq = E.equipoDe(j);
+  return asientos.some((a, x) => x !== j && E.equipoDe(x) === eq && !estado.alMazo[x] && (a.tipo === "yo" || (a.tipo === "persona" && a.conectado)));
+}
+/**
+ * Cuánto espera el bot antes de jugar. Con una persona en su equipo (que quizás le está por hacer una seña) espera
+ * lo que esperaría alguien que juega: unos 3 a 4 segundos, y 5 desde que se repartió. Si no, el ritmo de siempre.
+ * `minimo[j]` fuerza la pausa de un bot (cuando acaba de llegarle un gesto de su compañero).
+ */
+function programarBots(minimo = {}) {
   if (modo === "invitado" || !estado) return;
   asientos.forEach((a, j) => {
     if (a.tipo !== "bot" || botTimers.has(j)) return;
     const acc = E.acciones(estado, j);
     if (!acc.length || acc.every((x) => x.t === "en_mesa")) return;
     const finMano = estado.fase !== "jugando";
-    const pausa = (finMano ? 1800 + Math.random() * 900 : 1000 + Math.random() * 1100) + Math.max(0, 3000 - (Date.now() - ultimoReparto));
+    const humano = !finMano && hayHumanoEnEquipo(j);
+    const desdeReparto = Date.now() - ultimoReparto;
+    let pausa = finMano ? 1800 + Math.random() * 900
+      : humano ? Math.max(2800 + Math.random() * 1500, 5000 - desdeReparto)
+      : 1000 + Math.random() * 1100 + Math.max(0, 3000 - desdeReparto);
+    if (minimo[j]) pausa = minimo[j];
+    if (!botDesde.has(j)) botDesde.set(j, Date.now());
     botTimers.set(j, setTimeout(() => {
-      botTimers.delete(j);
+      botTimers.delete(j); botDesde.delete(j);
       if (asientos[j]?.tipo !== "bot" || !E.acciones(estado, j).length) return programarBots();
       try { hostAplicar(j, BotE.elegir(E.vista(estado, j), { senas: senasPara(j), nivel: config.dificultad || "normal" })); } catch (e) { console.error(e); }
       programarBots();
     }, pausa));
   });
 }
+/** Un compañero (persona) acaba de hacer un gesto: el bot que iba a jugar lo escucha antes de decidir (hasta 12 s de espera en total). */
+function escucharAlCompa(j, tipo) {
+  const minimo = {};
+  asientos.forEach((a, b) => {
+    if (a.tipo !== "bot" || b === j || E.equipoDe(b) !== E.equipoDe(j) || !botTimers.has(b)) return;
+    if (Date.now() - (botDesde.get(b) || Date.now()) > 12000) return;
+    clearTimeout(botTimers.get(b)); botTimers.delete(b);
+    minimo[b] = tipo === "pregunta" ? 2300 + Math.random() * 900 : 1500 + Math.random() * 900;   // una pregunta se contesta primero con la cabeza
+  });
+  if (Object.keys(minimo).length) programarBots(minimo);
+}
 
 /** Lo que el bot sabe de sus compañeros: las señas de cartas y las respuestas con la cabeza. */
 function senasPara(j) {
-  const cartas = [], rivales = [], equipo = E.equipoDe(j);
+  const cartas = [], rivales = [], ordenes = [], equipo = E.equipoDe(j);
   let tanto = 0;
   senasMano.forEach((lista, x) => {
     if (E.equipoDe(x) !== equipo) { // solo el difícil está atento a las señas de los rivales
@@ -266,11 +294,15 @@ function senasPara(j) {
     if (x === j) return;
     for (const g of lista) {
       if (g.tipo === "sena" && g.k !== "nada" && g.k !== "flor") cartas.push(g.k);
+      if (g.tipo === "pregunta") { // lo que dijo el pie: «matala», «pasá» o «¡vamos a…!» (la baza en que lo dijo)
+        const v = /^p_vamos_([0-5])$/.exec(g.k);
+        if (v || g.k === "p_mata" || g.k === "p_pasa") ordenes.push({ k: g.k, baza: g.baza, vamos: v ? +v[1] : undefined });
+      }
       if (g.tipo === "cabeza" && g.a === "p_envido" && g.k === "si") tanto = Math.max(tanto, 28);
       if (g.tipo === "cabeza" && g.a === "p_mas27" && g.k === "mas") tanto = Math.max(tanto, 30);
     }
   });
-  return { cartas, tanto, rivales };
+  return { cartas, tanto, rivales, ordenes };
 }
 
 function planificarSenasBots() {
@@ -314,10 +346,11 @@ function registrarGesto(j, tipo, k) {
   if (!estado || estado.fase !== "jugando" || estado.tipoMano !== "redonda" || estado.alMazo[j]) return;
   const valido = (tipo === "sena" && K.senaDe(k)) || (tipo === "cabeza" && K.cabezaDe(k)) || (tipo === "pregunta" && puedePreguntar(j, k));
   if (!valido) return;
-  const g = { tipo, k, a: tipo === "cabeza" && ultimaPregunta && E.equipoDe(ultimaPregunta.de) === E.equipoDe(j) ? ultimaPregunta.k : null };
+  const g = { tipo, k, baza: estado.bazas.length - 1, a: tipo === "cabeza" && ultimaPregunta && E.equipoDe(ultimaPregunta.de) === E.equipoDe(j) ? ultimaPregunta.k : null };
   senasMano[j]?.push(g);
   red?.enviarTodos({ t: "gesto", jugador: j, tipo, k });
   if (asientos[j].tipo !== "yo") mostrarGesto(j, tipo, k);
+  if (asientos[j].tipo !== "bot") escucharAlCompa(j, tipo);   // el bot compañero espera a oír lo que le dicen
   if (tipo === "pregunta") {
     ultimaPregunta = { de: j, k };
     const mano = estado.numeroMano;

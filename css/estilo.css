@@ -143,3 +143,33 @@ input[type=text]:focus { border-color: var(--ambar); outline: none; }
 .acciones .tanto-sel .b.paso:disabled { opacity: .35; }
 .acciones .tanto-sel .tanto-nota { flex-basis: 100%; text-align: center; font: 12px "IBM Plex Mono", monospace; color: var(--ambar); min-height: 0; }
 .acciones .tanto-sel.miente .b.fuerte { outline: 2px dashed var(--ambar); outline-offset: 2px; }
+
+/* ---------- portada: jugar ya ---------- */
+.bloque.ya { gap: 8px; margin-bottom: 4px; }
+.ya-nota { font-family: Plex; font-size: 11.5px; color: var(--gris); text-align: center; }
+#vista-jugar:has(#bloque-crear[hidden]) #bloque-ya { display: none; }
+.b.fuerte.grande { min-height: 56px; font-size: 19px; }
+.b.fuerte:hover, .b.fuerte:focus-visible { background: #f5b955; }
+
+/* ---------- cantos: el truco manda, el envido se despliega ---------- */
+.acciones .b.canto.estrella { flex: 1.5 1 0; background: var(--ambar); border-color: var(--ambar); color: var(--tinta); font-weight: 700; font-size: 17px; }
+.acciones .b.canto.estrella:active { background: #d9942b; }
+.acciones .fila-env[hidden] { display: none; }
+.acciones .fila-env { animation: aparece .18s ease; }
+.acciones .b[aria-expanded="true"] { background: rgba(240,169,59,.18); }
+
+/* ---------- el paño marca dónde cae cada baza ---------- */
+.ranura { position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none; border-radius: 5% / 3.5%;
+  border: 1.5px dashed rgba(235,228,212,.2); background: rgba(0,0,0,.08); transition: transform .4s, width .4s, height .4s; }
+.ranura[data-n]:not([data-n=""])::after { content: attr(data-n); position: absolute; left: 50%; top: calc(100% + 1px); transform: translateX(-50%); font-family: Caveat; font-size: 20px; color: rgba(235,228,212,.38); line-height: 1; }
+
+/* ---------- escritorio ancho: el tanteador pegado a la mesa, no al borde ---------- */
+@media (min-width: 1100px) { .servilleta.fija { right: auto; left: calc(50% + 330px); top: 110px; width: 190px; } }
+
+/* en celular angosto la etiqueta «mano» no le come el nombre al rival */
+@media (max-width: 430px) {
+  .barra { gap: 6px; }
+  .barra .chip { flex: none; font-size: 10px; padding: 1px 6px; }
+  .barra .rival .nombre { min-width: 5.2em; }
+}
+@media (min-width: 1100px) { .nota { left: calc(50% - 510px); max-width: 190px; font-size: 23px; } }

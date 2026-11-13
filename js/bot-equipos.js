@@ -1,8 +1,10 @@
 // Bot para la mesa de 4 y de 6. Mira solo su vista y elige entre vista.acciones.
 // En punta y hacha juega su duelo con el bot de 1 contra 1. En la mano redonda tiene en cuenta
 // lo que ya tiró su compañero: si la baza ya es del equipo, tira la más baja.
-// `senas` (opcional): lo que le mostraron los compañeros, { cartas: ["ancho_espada", "tres", …], tanto: n } —
-// lo usa el pie para decidir los cantos (las claves son las de las señas en docs/reglas.md).
+// `senas` (opcional): lo que le mostraron los compañeros, { cartas: ["ancho_espada", "tres", …], tanto: n,
+// ordenes: [{ k, baza, vamos }] } — lo usa el pie para decidir los cantos y todos para elegir carta: obedece lo que
+// dijo el pie en esa baza («matala si podés», «pasá que voy yo», «¡vamos a…!») y abre bajo si el compañero señó una brava
+// (las claves son las de las señas en docs/reglas.md).
 
 import { jerarquia, tantoDe, tantoFlor, esFlor } from "./motor.js";
 import * as Bot from "./bot.js";
@@ -65,15 +67,42 @@ function fuerzaTruco(v, senas) {
   return { puntaje, buenas: todas.filter((f) => f >= 9).length };
 }
 
-function elegirCarta(v, jugar) {
+/** La última orden que dio el pie en la baza en curso (o null). */
+function ordenDeLaBaza(v, senas) {
+  const baza = v.bazas.length - 1;
+  const o = ((senas && senas.ordenes) || []).filter((x) => x.baza === baza);
+  return o.length ? o[o.length - 1] : null;
+}
+
+function elegirCarta(v, jugar, senas) {
   const mias = jugar.map((a) => ({ a, f: jerarquia(a.carta) })).sort((x, y) => x.f - y.f);
   const b = v.bazas[v.bazas.length - 1];
   const yaJugaron = b.cartas.filter(Boolean).length;
   const quedanRivales = Array.from({ length: v.n }, (_, x) => x)
     .filter((x) => eq(x) !== v.equipo && b.cartas[x] === null).length;
   const mejor = mejorDeLaBaza(v);
+  // lo que dijo el pie vale más que mi criterio: una persona lo obedece
+  const orden = ordenDeLaBaza(v, senas);
+  if (orden) {
+    const bajaNomas = mejor && mejor.jugador !== null && eq(mejor.jugador) === v.equipo && !quedanRivales;
+    if (orden.k === "p_pasa") return mias[0].a;                         // «pasá, que voy yo»: tiro la más baja
+    if (orden.k === "p_mata" && mejor) {                                // «matala si podés»: la más baja que la gana
+      if (bajaNomas) return mias[0].a;
+      const ganan = mias.filter((x) => x.f > mejor.f);
+      return (ganan.length ? ganan[0] : mias[0]).a;
+    }
+    if (orden.vamos !== undefined) {                                    // «¡vamos a…!»: si es mi carta, la mejor; si no, no compito
+      if (orden.vamos !== v.yo || bajaNomas) return mias[0].a;
+      return mias[mias.length - 1].a;
+    }
+  }
   if (!yaJugaron) {
-    if (v.bazas.length === 1) return mias[Math.floor(mias.length / 2)].a;
+    if (v.bazas.length === 1) {
+      // si un compañero señó una brava, abro bajo y que la juegue él (salvo que yo también tenga una)
+      const bravaDeCompa = ((senas && senas.cartas) || []).some((k) => (FUERZA_SENA[k] || 0) >= 12);
+      if (bravaDeCompa && mias[mias.length - 1].f < 12) return mias[0].a;
+      return mias[Math.floor(mias.length / 2)].a;
+    }
     return mias[mias.length - 1].f >= 10 ? mias[mias.length - 1].a : mias[0].a;
   }
   if (mejor && mejor.jugador !== null && eq(mejor.jugador) === v.equipo) {
@@ -158,7 +187,7 @@ function decidir(v, acc, rnd, senas) {
   if (seFueUnCompa && hay("mazo") && v.truco.nivel >= 2 && fuerzaTruco(v, senas).puntaje < 5 && rnd() < 0.7) return hay("mazo");
 
   const jugar = acc.filter((a) => a.t === "jugar");
-  if (jugar.length) return elegirCarta(v, jugar);
+  if (jugar.length) return elegirCarta(v, jugar, senas);
   return acc.find((a) => a.t !== "mazo") || acc[0];
 }
 

@@ -121,8 +121,12 @@ function pintarCabecera() {
     <span class="cab-chips">${G.tiene(p, "clasif") ? `<button class="chip-liga ${liga.metal}" data-ir="liga">${esc(liga.nombre)}</button>` : ""}
     <button class="chip-gloria" data-ir="pulperia" aria-label="${p.puntos} de gloria: ir a la pulpería">${SOL(16)}<b>${p.puntos}</b></button></span>`;
 }
+/** La pulpería abre con la gloria del primer producto (3 = una partida ganada); la liga, con los 40 de la clasificatoria. */
+const PUL_MIN = C.CATALOGO.find((x) => x.p > 0)?.p ?? 3;
 function pintarPestanas() {
   const p = N.miPerfil(), n = p ? canjeables(p).length : 0;
+  $("#pestanas [data-ir=pulperia]")?.classList.toggle("bloq", (p?.puntos || 0) < PUL_MIN);
+  $("#pestanas [data-ir=liga]")?.classList.toggle("bloq", !G.tiene(p, "clasif"));
   const globo = $("#pestanas .globo");
   if (globo) { globo.hidden = !n; globo.textContent = n || ""; }
   const tc = $("#pestanas .tab-cara");
@@ -311,6 +315,7 @@ function pintarPulperia() {
   const prox = C.proximoProducto(puntos);
   const ant = [...C.CATALOGO].reverse().find((x) => x.p <= puntos)?.p || 0;
   const pct = prox ? Math.round(((puntos - ant) / Math.max(1, prox.p - ant)) * 100) : 100;
+  if (puntos < PUL_MIN) return pintarPulperiaCerrada(el, p, puntos, hechos);
   const lista = C.CATALOGO.filter((x) => filtroTienda === "todo" || x.cat === filtroTienda);
   const n = (k) => C.CATALOGO.filter((x) => (k === "todo" || x.cat === k) && estadoDe(p, x, hechos) === "canjear").length;
   const tienes = C.CATALOGO.filter((x) => estadoDe(p, x, hechos) !== "bloqueado").length;
@@ -333,6 +338,24 @@ function pintarPulperia() {
     <div class="filtros" role="group" aria-label="Qué mostrar">${Object.entries(C.CATS).map(([k, t]) => `<button type="button" data-filtro="${k}" aria-pressed="${k === filtroTienda}">${t}${n(k) ? `<i>${n(k)}</i>` : ""}</button>`).join("")}</div>
     <ul class="estante">${prods}</ul>
     <p class="como">${SOL(14)} Cómo se junta: ganar una partida da 3; perder por menos de 5, 1; con el mate y tomando uno, +1. Cuenta en partidas con alguien que también entró con su cuenta.</p>`;
+}
+/** Antes de la primera gloria la pulpería está cerrada: se ve qué hay y cuánto falta, y solo se puede elegir la cara (regalo de la casa). */
+function pintarPulperiaCerrada(el, p, puntos, hechos) {
+  const falta = PUL_MIN - puntos;
+  const muestra = C.CATALOGO.slice(0, 6).map((x) => {
+    const est = estadoDe(p, x, hechos);
+    return `<li><button class="prod ${est}" data-ficha="${x.k}" aria-label="${esc(x.nombre)}, ${est === "bloqueado" ? `se abre con ${x.p} de gloria` : "regalo de la casa"}">
+      <span class="prod-luz">${ilus(x, p, 66)}</span><span class="prod-n">${esc(x.nombre)}</span>
+      <span class="etiqueta">${est === "bloqueado" ? `${CANDADO}<span>${x.p}</span>` : `${SOL(11)}<span>tuyo</span>`}</span></button></li>`;
+  }).join("");
+  el.innerHTML = `<h2 class="tit-vista">La pulpería</h2>
+    ${!p ? tarjetaEntrar(N.miUsuario() ? "Elegí tu usuario en Jugar para empezar a juntar gloria." : "Entrá con tu cuenta para juntar gloria jugando con amigos y canjearla acá.") : ""}
+    <div class="liga-cerrada"><span class="sol-cerrado">${SOL(96)}</span><span class="candado-g">${CANDADO}</span>
+      <h3>Abre con ${PUL_MIN} de gloria</h3>
+      <p>${p ? `Tenés ${puntos}. Te faltan <b>${falta}</b>: ${partidasPara(falta)}.` : `Se abre con tu primera partida ganada.`} Cuentan las partidas con alguien que también entró con su cuenta; contra la máquina no.</p>
+      <span class="barra-g"><i style="width:${Math.round((puntos / PUL_MIN) * 100)}%"></i></span></div>
+    <section><h3 class="tit-sec">Lo que te espera</h3><ul class="estante">${muestra}</ul></section>
+    <p class="como">${SOL(14)} Cómo se junta: ganar una partida da 3; perder por menos de 5, 1; con el mate y tomando uno, +1.</p>`;
 }
 function clicPulperia(e) {
   const f = e.target.closest("[data-filtro]");
@@ -715,7 +738,7 @@ async function pintarLiga() {
   const escalera = `<ol class="escalera">${G.LIGAS.map((n, i) => { const l = G.ligaDe(i * 100); return `<li class="${i < liga.i ? "pasada" : i === liga.i ? "actual" : ""}">${escudo(l, i === liga.i ? 34 : 24, i > liga.i)}<span>${esc(n)}</span></li>`; }).join("")}</ol>`;
   if (!G.tiene(p, "clasif")) {
     el.innerHTML = `<h2 class="tit-vista">Liga</h2><div class="liga-cerrada">${escudo(G.ligaDe(0), 110, true)}<span class="candado-g">${CANDADO}</span>
-      <h3>Se abre con 40 de gloria</h3><p>Tenés ${p.puntos}. Te faltan <b>${40 - p.puntos}</b>: ${partidasPara(40 - p.puntos)}.</p>
+      <h3>Se abre con 40 de gloria</h3><p>Tenés ${p.puntos}. Te faltan <b>${40 - p.puntos}</b>: ${partidasPara(40 - p.puntos)}. Cuentan las partidas con alguien que también entró con su cuenta.</p>
       <span class="barra-g"><i style="width:${Math.round((p.puntos / 40) * 100)}%"></i></span></div>
       <section><h3 class="tit-sec">Las ligas</h3>${escalera}<p class="nota-eq">Cada liga son 100 puntos: unas 3 victorias contra alguien de tu nivel. Los objetos (mate, peluca, trampa, gorrita) valen recién desde Oro 4.</p></section>`;
     return;

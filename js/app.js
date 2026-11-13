@@ -57,7 +57,7 @@ function iniciar() {
     const enEquipo = jugadoresElegidos() > 2;
     $("#campo-punta").hidden = !enEquipo;
     $("#btn-crear span").textContent = enEquipo ? "Armar la mesa" : "Invitar a alguien";
-    $("#btn-practica span").textContent = enEquipo ? "Practicar con bots" : "Practicar contra la máquina";
+    $("#btn-practica span").textContent = enEquipo ? "Jugar con bots" : "Jugar ahora";
     resumirAjustes();
   });
   resumirAjustes();
@@ -93,6 +93,7 @@ function leerForm() {
   const nombre = ($("#in-nombre").value.trim() || "Yo").slice(0, 16); guardarNombre(nombre);
   return { nombre, meta: +document.querySelector("[data-meta][aria-pressed=true]").dataset.meta, flor: document.querySelector("[data-flor][aria-pressed=true]").dataset.flor === "1",
     dificultad: document.querySelector("[data-nivel][aria-pressed=true]")?.dataset.nivel || "normal",
+    ritmo: document.querySelector("[data-ritmo][aria-pressed=true]")?.dataset.ritmo || "agil",
     jugadores: jugadoresElegidos(), puntaYHacha: jugadoresElegidos() > 2 && document.querySelector("[data-punta][aria-pressed=true]")?.dataset.punta === "1" };
 }
 /** «Reglas de la mesa» cerrado muestra lo elegido en una línea. */
@@ -276,7 +277,9 @@ function programarBot() {
   // en el fin de mano el bot confirma tranquilo, para que se alcance a leer el resumen
   const finMano = acc.every(a => a.t === "seguir" || a.t === "mostrar" || a.t === "en_mesa");
   if (acc.every(a => a.t === "en_mesa")) return;  // pedir en mesa es decisión del bot solo cuando además le toca algo
-  const espera = (finMano ? 2600 : 900 + Math.random() * 900) + Math.max(0, 2800 - (Date.now() - ultimoReparto));
+  // ágil (por defecto): el bot contesta en menos de un segundo; tranquilo: el de antes
+  const piensa = config.ritmo === "tranquilo" ? 900 + Math.random() * 900 : 400 + Math.random() * 450;
+  const espera = (finMano ? 2600 : piensa) + Math.max(0, 2800 - (Date.now() - ultimoReparto));
   botTimer = setTimeout(() => { try { hostAplicar(1, Bot.elegir(M.vista(estado, 1), azarDe(config.dificultad))); } catch (e) { console.error(e); } }, espera);
 }
 
@@ -421,6 +424,15 @@ function renderPano(m) {
   p.className = "pano1 pano-" + Perfil.miPano();
   const w = Math.min(m.W - 20, 600), top = m.rivalY - m.rh * 0.15, bot = m.manoY - m.ch * 0.12;
   Object.assign(p.style, { left: (m.W - w) / 2 + "px", width: w + "px", top: top + "px", height: Math.max(80, bot - top) + "px" });
+  // las tres bazas se marcan en el paño: dos huecos por baza (el del rival arriba, el tuyo abajo), para que se vea adónde cae cada carta
+  for (let i = 0; i < 3; i++) for (const arriba of [true, false]) {
+    const id = `ranura-${i}-${arriba ? "r" : "y"}`;
+    let r = document.getElementById(id);
+    if (!r) { r = document.createElement("div"); r.id = id; r.className = "ranura"; r.setAttribute("aria-hidden", "true"); $("#mesa").insertBefore(r, p.nextSibling); }
+    const x = m.cx + (i - 1) * m.tw * 1.22, y = m.mesaY + (arriba ? -1 : 1) * m.th * 0.3;
+    Object.assign(r.style, { width: m.tw + "px", height: m.th + "px", transform: `translate(${x - m.tw / 2}px, ${y - m.th / 2}px)` });
+    r.dataset.n = arriba ? "" : i + 1;
+  }
 }
 /** La cara del rival en la barra, con su pinta (en práctica, la del Barajador). */
 function renderCaraRival(pr) {
@@ -598,7 +610,25 @@ function renderAcciones(v) {
   }
   if (cantos.length) {
     const env = cantos.filter(a => !TRUCOS.includes(a.c)), tru = cantos.filter(a => TRUCOS.includes(a.c));
-    for (const grupo of [env, tru]) if (grupo.length) { const f = fila(); for (const a of grupo) boton(f, BOTON_CANTO[a.c] || a.c, "canto", () => enviarAccion(a)); }
+    const libre = !v.cantoPendiente;   // si no hay nada que contestar, el truco es la jugada estrella y el envido se agrupa
+    if (libre && env.length > 1) {
+      const f = fila();
+      const b = boton(f, "Envido ▾", "canto", () => {
+        const abierta = nav.classList.toggle("env-abierto");
+        b.setAttribute("aria-expanded", abierta); b.textContent = abierta ? "Envido ▴" : "Envido ▾";
+        nav.querySelector(".fila-env").hidden = !abierta;
+      });
+      b.setAttribute("aria-expanded", "false");
+      for (const a of tru) boton(f, BOTON_CANTO[a.c] || a.c, "canto estrella", () => enviarAccion(a));
+      const sub = fila(); sub.classList.add("fila-env"); sub.hidden = true;
+      for (const a of env) boton(sub, BOTON_CANTO[a.c] || a.c, "canto", () => enviarAccion(a));
+      nav.insertBefore(sub, f);   // el desplegable queda arriba, pegado a las cartas
+    } else {
+      for (const grupo of [env, tru]) if (grupo.length) {
+        const f = fila();
+        for (const a of grupo) boton(f, BOTON_CANTO[a.c] || a.c, "canto" + (libre && TRUCOS.includes(a.c) ? " estrella" : ""), () => enviarAccion(a));
+      }
+    }
   }
   if (chicas.length) {
     const f = fila();
