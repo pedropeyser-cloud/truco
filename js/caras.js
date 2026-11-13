@@ -27,6 +27,7 @@ export const PREGUNTAS = [
   { k: "p_truco", texto: "¿Tenés algo para el truco?", quien: "pie" },
   { k: "p_mata", texto: "Matala si podés.", quien: "pie" },
   { k: "p_pasa", texto: "Pasá, que voy yo.", quien: "pie" },
+  { k: "p_senas", texto: "Hacéme señas.", quien: "todos" },
   { k: "p_canto", texto: "¿Canto?", quien: "todos" },
   { k: "p_canto_envido", texto: "¿Canto envido?", quien: "todos" },
   { k: "p_canto_truco", texto: "¿Canto truco?", quien: "todos" },

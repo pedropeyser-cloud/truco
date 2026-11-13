@@ -35,6 +35,7 @@ let perfilesMesa = [], idsMesa = [], enClasif = false, cuentas = {}, misCuentas 
 const pruebas = new Map(); // anfitrión: id de conexión → { perfil que dice tener, código }
 let probado = false;        // invitado: contesta una sola prueba por mesa // perfiles por asiento (de la base), clasificatoria, cuentas de estilo
 const botTimers = new Map();
+let envAbierto = false; // el desplegable de los envidos (cuando no hay nada que contestar)
 const cartasEl = new Map();
 let carasEl = [];               // por asiento: { el, svg, parar }
 
@@ -214,7 +215,7 @@ function hostAplicar(j, accion) {
 }
 
 function difundir(eventos) {
-  if (eventos.some((e) => e.t === "reparto")) { ultimoReparto = Date.now(); senasMano = Array.from({ length: estado.n }, () => []); ultimaPregunta = null; }
+  if (eventos.some((e) => e.t === "reparto")) { ultimoReparto = Date.now(); senasMano = Array.from({ length: estado.n }, () => []); ultimaPregunta = null; pedidos.clear(); }
   if (modo === "anfitrion") G.contarEventos(cuentas, eventos, estado);
   asientos.forEach((a, j) => {
     if (a.tipo === "yo") recibir(E.vista(estado, j), eventos);
@@ -237,15 +238,55 @@ async function anotarMesa() {
 }
 
 // ---------------- bots ----------------
-const botDesde = new Map(); // j → cuándo empezó a esperar su turno (para no esperar a un compañero para siempre)
-/** ¿Hay una persona de su equipo que puede estar por hacerle una seña o una pregunta? */
-function hayHumanoEnEquipo(j) {
+const botDesde = new Map(); // j → cuándo empezó a esperar su turno (tope de seguridad si el compañero no contesta)
+const pedidos = new Map();  // j → { t0, n, ultimo }: cuántas veces pidió que le hagan señas en esta mano
+const ordenesDadas = new Set(); // `${mano}:${baza}` — baza en que el bot pie ya dio una orden
+const TOPE_ESPERA = 45000;     // si nadie le contesta en 45 s, juega solo (para que la mesa nunca quede colgada)
+
+/** Las personas de su equipo (en la mano) que pueden decirle algo. */
+function humanosDe(j) {
   const eq = E.equipoDe(j);
-  return asientos.some((a, x) => x !== j && E.equipoDe(x) === eq && !estado.alMazo[x] && (a.tipo === "yo" || (a.tipo === "persona" && a.conectado)));
+  return asientos.map((a, x) => x).filter((x) => x !== j && E.equipoDe(x) === eq && !estado.alMazo[x]
+    && (asientos[x].tipo === "yo" || (asientos[x].tipo === "persona" && asientos[x].conectado)));
 }
 /**
- * Cuánto espera el bot antes de jugar. Con una persona en su equipo (que quizás le está por hacer una seña) espera
- * lo que esperaría alguien que juega: unos 3 a 4 segundos, y 5 desde que se repartió. Si no, el ritmo de siempre.
+ * Lo que al bot le falta saber para jugar, como lo haría una persona: si su compañero no le mostró las cartas
+ * (las señas), se las pide; si es el pie y le cantaron envido o truco, le pregunta antes de contestar.
+ * No espera por tiempo: espera por esa información. Devuelve { k } con la pregunta que corresponde o null.
+ */
+function faltaSaber(j) {
+  if (!estado || estado.fase !== "jugando" || estado.tipoMano !== "redonda") return null;
+  const humanos = humanosDe(j);
+  if (!humanos.length) return null;
+  if (Date.now() - (botDesde.get(j) || Date.now()) > TOPE_ESPERA) return null;
+  if (!humanos.some((x) => senasMano[x]?.some((g) => g.tipo === "sena"))) return { k: "p_senas" };
+  const p = estado.pendiente;
+  if (p && p.responde === j && E.pieDe(estado, E.equipoDe(j)) === j && E.equipoDe(p.de) !== E.equipoDe(j)) {
+    const k = p.tipo === "envido" ? "p_envido" : p.tipo === "truco" ? "p_truco" : null;
+    if (k) {
+      const hechaEn = pedidos.get(j + ":" + k);
+      const contestada = humanos.some((x) => senasMano[x]?.some((g) => g.tipo === "cabeza" && g.a === k && g.t >= (hechaEn?.t0 ?? Infinity)));
+      if (!contestada) return { k };
+    }
+  }
+  return null;
+}
+/** Un bot que necesita saber algo lo pide en voz alta, sin apurar: primero da unos segundos, y después repite (hasta 3 veces). */
+function pedirLoQueFalta(j, falta) {
+  const clave = falta.k === "p_senas" ? String(j) : j + ":" + falta.k;
+  let p = pedidos.get(clave);
+  if (!p) { p = { t0: Date.now(), n: 0, ultimo: 0 }; pedidos.set(clave, p); }
+  const espera = Date.now() - (p.n ? p.ultimo : p.t0);
+  if ((p.n === 0 && espera >= (falta.k === "p_senas" ? 2500 : 600)) || (p.n > 0 && p.n < 3 && espera >= 12000)) {
+    p.n++; p.ultimo = Date.now();
+    if (falta.k !== "p_senas") p.t0 = Date.now();   // la respuesta tiene que ser posterior a la pregunta
+    registrarGesto(j, "pregunta", falta.k);
+  }
+}
+
+/**
+ * Cuándo juega cada bot. Con una persona en su equipo no juega hasta saber lo que tiene que saber (`faltaSaber`):
+ * si falta, pide y espera, y vuelve a mirar cada 1,5 s. Lo demás es el ritmo de siempre.
  * `minimo[j]` fuerza la pausa de un bot (cuando acaba de llegarle un gesto de su compañero).
  */
 function programarBots(minimo = {}) {
@@ -255,27 +296,61 @@ function programarBots(minimo = {}) {
     const acc = E.acciones(estado, j);
     if (!acc.length || acc.every((x) => x.t === "en_mesa")) return;
     const finMano = estado.fase !== "jugando";
-    const humano = !finMano && hayHumanoEnEquipo(j);
     const desdeReparto = Date.now() - ultimoReparto;
-    let pausa = finMano ? 1800 + Math.random() * 900
-      : humano ? Math.max(2800 + Math.random() * 1500, 5000 - desdeReparto)
-      : 1000 + Math.random() * 1100 + Math.max(0, 3000 - desdeReparto);
+    let pausa = finMano ? 1800 + Math.random() * 900 : 1000 + Math.random() * 1100 + Math.max(0, 3000 - desdeReparto);
     if (minimo[j]) pausa = minimo[j];
     if (!botDesde.has(j)) botDesde.set(j, Date.now());
     botTimers.set(j, setTimeout(() => {
-      botTimers.delete(j); botDesde.delete(j);
-      if (asientos[j]?.tipo !== "bot" || !E.acciones(estado, j).length) return programarBots();
+      botTimers.delete(j);
+      if (asientos[j]?.tipo !== "bot" || !E.acciones(estado, j).length) { botDesde.delete(j); return programarBots(); }
+      const falta = faltaSaber(j);
+      if (falta) { pedirLoQueFalta(j, falta); return programarBots({ [j]: 1500 }); }   // espera la info, no el reloj
+      botDesde.delete(j);
       try { hostAplicar(j, BotE.elegir(E.vista(estado, j), { senas: senasPara(j), nivel: config.dificultad || "normal" })); } catch (e) { console.error(e); }
       programarBots();
     }, pausa));
   });
+  ordenarElPieBot();
 }
-/** Un compañero (persona) acaba de hacer un gesto: el bot que iba a jugar lo escucha antes de decidir (hasta 12 s de espera en total). */
+/**
+ * El bot que es pie le da órdenes a su compañero (persona) cuando le toca tirar y ya sabe qué tiene (por sus señas):
+ * «matala si podés» si tiene con qué ganarle a la carta rival, «pasá, que voy yo» si él gana y el otro no,
+ * «¡vamos a vos!» si abre con una brava. Una orden por baza.
+ */
+function ordenarElPieBot() {
+  if (!estado || estado.fase !== "jugando" || estado.tipoMano !== "redonda" || estado.pendiente || (estado.envido && estado.envido.estado === "querido")) return;
+  const baza = estado.bazas.length - 1, b = estado.bazas[baza];
+  if (!b) return;
+  const clave = `${estado.numeroMano}:${baza}`;
+  asientos.forEach((a, j) => {
+    if (a.tipo !== "bot" || estado.alMazo[j] || E.pieDe(estado, E.equipoDe(j)) !== j || ordenesDadas.has(clave + ":" + j)) return;
+    const x = estado.turno;
+    if (x === j || E.equipoDe(x) !== E.equipoDe(j) || !humanosDe(j).includes(x)) return;
+    if (!(senasMano[x] || []).some((g) => g.tipo === "sena")) return;   // sin sus señas no ordena: no sabe qué tiene
+    const cartas = (senasMano[x] || []).filter((g) => g.tipo === "sena" && g.k !== "nada" && g.k !== "flor").map((g) => BotE.FUERZA_SENA[g.k] || 0);
+    const suya = Math.max(0, ...cartas);
+    const rivales = b.cartas.map((c, i) => (c && E.equipoDe(i) !== E.equipoDe(j) ? jerarquia(c) : null)).filter((f) => f !== null);
+    const mejorRival = rivales.length ? Math.max(...rivales) : null;
+    const mia = Math.max(0, ...estado.enMano[j].map(jerarquia));
+    let k = null;
+    if (mejorRival !== null) {
+      if (suya > mejorRival && suya >= 10) k = "p_mata";
+      else if (mia > mejorRival && suya < mejorRival) k = "p_pasa";
+    } else if (b.cartas.every((c) => c === null) && suya >= 12) k = `p_vamos_${x}`;
+    if (!k) return;
+    ordenesDadas.add(clave + ":" + j);
+    const mano = estado.numeroMano;
+    setTimeout(() => {
+      if (!estado || estado.numeroMano !== mano || estado.bazas.length - 1 !== baza || estado.turno !== x || estado.pendiente || asientos[j]?.tipo !== "bot") return;
+      registrarGesto(j, "pregunta", k);
+    }, 1200 + Math.random() * 900);
+  });
+}
+/** Un compañero (persona) acaba de hacer un gesto: el bot que iba a jugar lo escucha antes de decidir. */
 function escucharAlCompa(j, tipo) {
   const minimo = {};
   asientos.forEach((a, b) => {
     if (a.tipo !== "bot" || b === j || E.equipoDe(b) !== E.equipoDe(j) || !botTimers.has(b)) return;
-    if (Date.now() - (botDesde.get(b) || Date.now()) > 12000) return;
     clearTimeout(botTimers.get(b)); botTimers.delete(b);
     minimo[b] = tipo === "pregunta" ? 2300 + Math.random() * 900 : 1500 + Math.random() * 900;   // una pregunta se contesta primero con la cabeza
   });
@@ -298,6 +373,7 @@ function senasPara(j) {
         const v = /^p_vamos_([0-5])$/.exec(g.k);
         if (v || g.k === "p_mata" || g.k === "p_pasa") ordenes.push({ k: g.k, baza: g.baza, vamos: v ? +v[1] : undefined });
       }
+      if (g.tipo === "cabeza" && g.a === "p_truco" && g.k === "si") cartas.push("tres");   // «sí, tengo algo»: cuenta como una buena
       if (g.tipo === "cabeza" && g.a === "p_envido" && g.k === "si") tanto = Math.max(tanto, 28);
       if (g.tipo === "cabeza" && g.a === "p_mas27" && g.k === "mas") tanto = Math.max(tanto, 30);
     }
@@ -346,16 +422,17 @@ function registrarGesto(j, tipo, k) {
   if (!estado || estado.fase !== "jugando" || estado.tipoMano !== "redonda" || estado.alMazo[j]) return;
   const valido = (tipo === "sena" && K.senaDe(k)) || (tipo === "cabeza" && K.cabezaDe(k)) || (tipo === "pregunta" && puedePreguntar(j, k));
   if (!valido) return;
-  const g = { tipo, k, baza: estado.bazas.length - 1, a: tipo === "cabeza" && ultimaPregunta && E.equipoDe(ultimaPregunta.de) === E.equipoDe(j) ? ultimaPregunta.k : null };
+  const g = { tipo, k, t: Date.now(), baza: estado.bazas.length - 1, a: tipo === "cabeza" && ultimaPregunta && E.equipoDe(ultimaPregunta.de) === E.equipoDe(j) ? ultimaPregunta.k : null };
   senasMano[j]?.push(g);
   red?.enviarTodos({ t: "gesto", jugador: j, tipo, k });
   if (asientos[j].tipo !== "yo") mostrarGesto(j, tipo, k);
   if (asientos[j].tipo !== "bot") escucharAlCompa(j, tipo);   // el bot compañero espera a oír lo que le dicen
+  if (tipo === "sena" && asientos[j].tipo !== "bot") ordenarElPieBot();   // si el bot pie ya sabe qué tiene, ordena
   if (tipo === "pregunta") {
     ultimaPregunta = { de: j, k };
     const mano = estado.numeroMano;
     asientos.forEach((a, b) => {
-      if (a.tipo !== "bot" || b === j || E.equipoDe(b) !== E.equipoDe(j) || estado.alMazo[b]) return;
+      if (k === "p_senas" || a.tipo !== "bot" || b === j || E.equipoDe(b) !== E.equipoDe(j) || estado.alMazo[b]) return;
       setTimeout(() => { if (estado.numeroMano === mano) registrarGesto(b, "cabeza", respuestaBot(b, k)); }, 900 + Math.random() * 900);
     });
   }
@@ -759,7 +836,7 @@ function posiciones(v, m) {
     const off = i - (n - 1) / 2, sel = id === elegida;
     out.push({ key: id, id, x: m.cx + off * m.cw * 0.74, y: m.manoY + Math.abs(off) * m.cw * 0.07 - (sel ? m.ch * 0.16 : 0), w: m.cw, r: sel ? 0 : off * 8, z: 50 + i, jugable: jugables.has(id), elegida: sel });
   });
-  const tw = Math.min(m.tabW, m.tabH * 1.15) * (v.n === 6 ? 0.13 : 0.15); // en pantallas anchas la mesa es baja: manda el fondo
+  const tw = anchoEnMesa(v, m);
   cartasEnMesa(v).forEach((c, i) => {
     // cada baza nueva se apoya encima de la anterior, corrida hacia un costado (como en la mesa de verdad)
     const p = lugarCarta(c.j, v, m), d = corrimiento(c.j, v, m);
@@ -767,6 +844,26 @@ function posiciones(v, m) {
       gana: c.gana && !c.vieja, apagada: c.apagada || c.vieja, de: c.j, plano: true });
   });
   return out;
+}
+/** Ancho de una carta tirada: en pantallas anchas la mesa es baja, manda el fondo. */
+const anchoEnMesa = (v, m) => Math.min(m.tabW, m.tabH * 1.15) * (v.n === 6 ? 0.13 : 0.15);
+
+/** Ranuras en el paño: tres huecos (uno por baza) delante de cada asiento, donde van cayendo las cartas. */
+function renderRanuras(v, m) {
+  const tab = $("#eq-tablero");
+  if (!(v.fase === "jugando" || v.fase === "fin_mano") || v.tipoMano !== "redonda") { tab.querySelectorAll(".ranura-eq").forEach((r) => r.remove()); return; }
+  const tw = anchoEnMesa(v, m), h = tw * RATIO, vivas = new Set();
+  for (let j = 0; j < v.n; j++) {
+    const p = lugarCarta(j, v, m), d = corrimiento(j, v, m);
+    for (let b = 0; b < 3; b++) {
+      const id = `ranura-eq-${j}-${b}`; vivas.add(id);
+      let r = document.getElementById(id);
+      if (!r) { r = document.createElement("div"); r.id = id; r.className = "ranura-eq"; r.setAttribute("aria-hidden", "true"); tab.insertBefore(r, tab.firstChild); }
+      r.style.width = tw + "px"; r.style.height = h + "px";
+      r.style.transform = `translate3d(${p.x + d.x * b * tw - tw / 2}px, ${p.y + d.y * b * tw - h / 2}px, 0.5px) rotateZ(${j % 2 ? -1.5 : 1.5}deg)`;
+    }
+  }
+  tab.querySelectorAll(".ranura-eq").forEach((r) => { if (!vivas.has(r.id)) r.remove(); });
 }
 const giroDe = (id) => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) | 0; return (Math.abs(h) % 13) - 6; };
 
@@ -816,6 +913,7 @@ function render(eventos, sinAnim, reparto) {
   if (elegida && !v.miMano.includes(elegida)) elegida = null;
   layoutTablero(v, m);
   renderAsientos(v, m);
+  renderRanuras(v, m);
 
   const ps = posiciones(v, m), vivos = new Set(ps.map((p) => p.key)), c = centro(m);
   for (const [k, el] of cartasEl) if (!vivos.has(k)) { el.remove(); cartasEl.delete(k); }
@@ -1014,8 +1112,25 @@ function renderAcciones(v) {
   }
   if (cantos.length) {
     const env = cantos.filter((a) => !TRUCOS.includes(a.c)), tru = cantos.filter((a) => TRUCOS.includes(a.c));
-    for (const grupo of [env, tru]) if (grupo.length) { const f = fila(); for (const a of grupo) boton(f, BOTON_CANTO[a.c] || a.c, "canto", () => enviarAccion(a)); }
-  }
+    const libre = !v.cantoPendiente;   // si no hay nada que contestar, el truco es la jugada estrella y el envido se agrupa
+    if (libre && env.length > 1) {
+      const f = fila();
+      const b = boton(f, envAbierto ? "Envido ▴" : "Envido ▾", "canto", () => { envAbierto = !envAbierto; render([], true); });
+      b.setAttribute("aria-expanded", String(envAbierto));
+      for (const a of tru) boton(f, BOTON_CANTO[a.c] || a.c, "canto estrella", () => enviarAccion(a));
+      if (envAbierto) {
+        const sub = fila(); sub.classList.add("fila-env");
+        for (const a of env) boton(sub, BOTON_CANTO[a.c] || a.c, "canto", () => enviarAccion(a));
+        nav.insertBefore(sub, f);   // el desplegable queda arriba, pegado a las cartas
+      }
+    } else {
+      envAbierto = false;
+      for (const grupo of [env, tru]) if (grupo.length) {
+        const f = fila();
+        for (const a of grupo) boton(f, BOTON_CANTO[a.c] || a.c, "canto" + (libre && TRUCOS.includes(a.c) ? " estrella" : ""), () => enviarAccion(a));
+      }
+    }
+  } else envAbierto = false;
   if (chicas.length) {
     const f = fila();
     for (const a of chicas) {

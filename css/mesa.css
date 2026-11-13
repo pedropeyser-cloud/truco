@@ -101,6 +101,8 @@
 .tablero .canto { position: absolute; left: 14px; right: 14px; top: 100%; height: 20px; transform-origin: top; transform: rotateX(-90deg);
   background: linear-gradient(180deg, #2a1a0f, #120a05); border-radius: 0 0 10px 10px; }
 .tablero .ancla { position: absolute; width: 100px; height: 1px; pointer-events: none; }
+/* ranuras: el paño marca dónde cae cada baza (tres huecos delante de cada asiento) */
+.tablero .ranura-eq { position: absolute; left: 0; top: 0; pointer-events: none; border-radius: 5% / 3.5%; border: 1.5px dashed rgba(235,228,212,.22); background: rgba(0,0,0,.1); transition: transform .4s, width .4s, height .4s; }
 .tablero .carta { transition: transform .55s cubic-bezier(.25,.7,.35,1.12), opacity .15s; }
 .tablero .carta .cara { box-shadow: 0 8px 12px rgba(0,0,0,.6); }
 .tablero .carta.gana .cara.frente { box-shadow: 0 0 22px 6px rgba(240,169,59,.5), 0 8px 12px rgba(0,0,0,.6); }

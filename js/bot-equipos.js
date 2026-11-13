@@ -11,7 +11,7 @@ import * as Bot from "./bot.js";
 
 const ENVIDOS = ["envido", "real_envido", "falta_envido"];
 const TRUCOS = ["truco", "retruco", "vale_cuatro"];
-const FUERZA_SENA = { ancho_espada: 14, ancho_basto: 13, siete_espada: 12, siete_oro: 11, tres: 10, dos: 9, falso: 8 };
+export const FUERZA_SENA = { ancho_espada: 14, ancho_basto: 13, siete_espada: 12, siete_oro: 11, tres: 10, dos: 9, falso: 8 };
 
 function semillaDe(v) {
   const txt = JSON.stringify([v.yo, v.numeroMano, v.miMano, v.bazas, v.puntos, v.cantoPendiente,
