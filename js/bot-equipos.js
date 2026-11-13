@@ -74,6 +74,13 @@ function ordenDeLaBaza(v, senas) {
   return o.length ? o[o.length - 1] : null;
 }
 
+/** Lectura del rival al cantarle truco: si lo canta habiendo perdido la primera baza, probablemente va de farol (+2); si ya ganó la primera, va con respaldo (-1). */
+function leerRival(v, p) {
+  const b0 = v.bazas[0];
+  if (!b0 || b0.gana == null || b0.gana === "parda" || eq(p.de) === v.equipo) return 0;
+  return b0.gana === v.equipo ? 2 : -1;
+}
+
 function elegirCarta(v, jugar, senas) {
   const mias = jugar.map((a) => ({ a, f: jerarquia(a.carta) })).sort((x, y) => x.f - y.f);
   const b = v.bazas[v.bazas.length - 1];
@@ -116,7 +123,8 @@ function elegirCarta(v, jugar, senas) {
   return mias[0].a;
 }
 
-function decidir(v, acc, rnd, senas) {
+function decidir(v, acc, rnd, senas, base) {
+  const farol = (prob) => base() < prob;   // el farol no depende de la dificultad: un buen jugador miente siempre igual
   const hay = (t, c) => acc.find((a) => a.t === t && (c === undefined || a.c === c));
   if (acc.length === 1) return acc[0];
   if (hay("mostrar")) return hay("mostrar");
@@ -148,7 +156,8 @@ function decidir(v, acc, rnd, senas) {
   }
 
   if (p && ENVIDOS.includes(p.c)) {
-    const umbral = { envido: 27, real_envido: 29, falta_envido: 31 }[p.c];
+    // lo que dijo el compañero cuenta como un tanto de equipo: con «tengo envido» (28) se quiere el envido y el real
+    const umbral = { envido: 27, real_envido: 28, falta_envido: 30 }[p.c] - (atras >= 6 ? 1 : 0);
     const subida = hay("canto", "real_envido") || hay("canto", "falta_envido");
     if (tantoEquipo >= umbral + 4 && subida) return subida;
     if (tantoEquipo >= umbral) return hay("quiero");
@@ -156,30 +165,32 @@ function decidir(v, acc, rnd, senas) {
     return hay("no_quiero");
   }
 
-  if (p && p.c === "truco" && hay("canto", "envido") && (tanto >= 28 || rnd() < 0.04)) {
+  if (p && p.c === "truco" && hay("canto", "envido") && (tanto >= 28 || farol(0.04))) {
     return tanto >= 31 ? hay("canto", "real_envido") : hay("canto", "envido");
   }
 
   if (p && TRUCOS.includes(p.c)) {
-    const { puntaje } = fuerzaTruco(v, senas);
-    const umbral = { truco: 7, retruco: 10, vale_cuatro: 13 }[p.c];
+    const { puntaje: base0, buenas } = fuerzaTruco(v, senas);
+    const puntaje = base0 + leerRival(v, p);
+    const umbral = { truco: 6, retruco: 10, vale_cuatro: 13 }[p.c] - (atras >= 5 ? 2 : 0);   // atrás en el tanteador se arriesga más
     const subir = acc.find((a) => a.t === "canto" && TRUCOS.includes(a.c));
-    if (subir && (puntaje >= umbral + 6 || rnd() < 0.04)) return subir;
-    if (puntaje >= umbral || rnd() < 0.08) return hay("quiero");
+    if (subir && (puntaje >= umbral + 6 || farol(0.04))) return subir;
+    if (puntaje >= umbral || (p.c === "truco" && buenas >= 2) || rnd() < 0.08) return hay("quiero");
     return hay("no_quiero");
   }
 
   if (hay("canto", "envido")) {
     if (tanto >= 31) return atras >= 8 && hay("canto", "falta_envido") ? hay("canto", "falta_envido") : hay("canto", "real_envido");
     if (tanto >= 28) return hay("canto", "envido");
-    if (tanto <= 21 && rnd() < 0.05) return hay("canto", "envido");
+    if (tanto <= 24 && v.bazas.length === 1 && farol(0.08)) return hay("canto", "envido");   // farol de envido
   }
 
   const subirTruco = acc.find((a) => a.t === "canto" && TRUCOS.includes(a.c));
   if (subirTruco) {
     const { puntaje, buenas } = fuerzaTruco(v, senas);
     const umbral = { truco: 12, retruco: 15, vale_cuatro: 18 }[subirTruco.c];
-    if ((subirTruco.c === "truco" && buenas >= 2) || puntaje >= umbral || rnd() < 0.04) return subirTruco;
+    const faroleable = v.bazas.length === 1 || v.bazas.every((b) => b.gana !== (1 - v.equipo));   // no se miente habiendo perdido bazas
+    if ((subirTruco.c === "truco" && buenas >= 2) || puntaje >= umbral || (faroleable && farol(subirTruco.c === "truco" ? 0.1 : 0.03))) return subirTruco;
   }
 
   // si un compañero ya se fue al mazo y la mano es floja con el truco en juego, lo sigue
@@ -217,7 +228,7 @@ export function elegir(vista, { azar, senas, nivel = "normal" } = {}) {
   } else if (vista.fase !== "jugando") {
     decision = acc.find((a) => a.t === "mostrar") || acc.find((a) => a.t === "seguir") || acc[0];
   } else {
-    decision = decidir(vista, acc, rnd, senas);
+    decision = decidir(vista, acc, rnd, senas, base);
   }
   return (decision && acc.find((a) => mismaAccion(a, decision))) || acc[0];
 }

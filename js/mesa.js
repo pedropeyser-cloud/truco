@@ -264,9 +264,14 @@ function faltaSaber(j) {
   if (p && p.responde === j && E.pieDe(estado, E.equipoDe(j)) === j && E.equipoDe(p.de) !== E.equipoDe(j)) {
     const k = p.tipo === "envido" ? "p_envido" : p.tipo === "truco" ? "p_truco" : null;
     if (k) {
-      const hechaEn = pedidos.get(j + ":" + k);
-      const contestada = humanos.some((x) => senasMano[x]?.some((g) => g.tipo === "cabeza" && g.a === k && g.t >= (hechaEn?.t0 ?? Infinity)));
-      if (!contestada) return { k };
+      const respuesta = (q) => {
+        const hechaEn = pedidos.get(j + ":" + q);
+        return humanos.map((x) => senasMano[x]?.find((g) => g.tipo === "cabeza" && g.a === q && g.t >= (hechaEn?.t0 ?? Infinity))).find(Boolean);
+      };
+      const r = respuesta(k);
+      if (!r) return { k };
+      // si tiene envido y el canto es grande (real o falta), pregunta cuánto: ¿más de 27?
+      if (k === "p_envido" && r.k === "si" && p.c !== "envido" && !respuesta("p_mas27")) return { k: "p_mas27" };
     }
   }
   return null;
@@ -373,9 +378,9 @@ function senasPara(j) {
         const v = /^p_vamos_([0-5])$/.exec(g.k);
         if (v || g.k === "p_mata" || g.k === "p_pasa") ordenes.push({ k: g.k, baza: g.baza, vamos: v ? +v[1] : undefined });
       }
-      if (g.tipo === "cabeza" && g.a === "p_truco" && g.k === "si") cartas.push("tres");   // «sí, tengo algo»: cuenta como una buena
+      if (g.tipo === "cabeza" && g.a === "p_truco" && g.k === "si") cartas.push("siete_espada");   // «sí, tengo algo»: cuenta como una brava (12)
       if (g.tipo === "cabeza" && g.a === "p_envido" && g.k === "si") tanto = Math.max(tanto, 28);
-      if (g.tipo === "cabeza" && g.a === "p_mas27" && g.k === "mas") tanto = Math.max(tanto, 30);
+      if (g.tipo === "cabeza" && g.a === "p_mas27") tanto = g.k === "mas" ? 31 : 27;   // «más de 27»: 31 o menos; son las señas más precisas
     }
   });
   return { cartas, tanto, rivales, ordenes };
