@@ -141,6 +141,16 @@ export async function confirmarPartida(id, puntos, tomoMate = false, clasif = fa
   }
 }
 
+/** Gloria contra la máquina (supabase/maquina.sql): «tutorial» da 3 una vez; «victoria» da 1 (la base pone los topes). Devuelve lo que sumó. */
+export async function gloriaContraMaquina(motivo) {
+  if (!perfil) return 0;
+  if (window.__NUBE_FALSA) return window.__NUBE_FALSA.gloriaContraMaquina?.(motivo) ?? 0;
+  const { data, error } = await cli.rpc("gloria_contra_maquina", { p_motivo: motivo });
+  if (error) throw new Error(error.message);
+  if (data > 0) await refrescarPerfil();
+  return data || 0;
+}
+
 // ---------- equipos ----------
 export async function misEquipos() {
   if (!perfil) return [];

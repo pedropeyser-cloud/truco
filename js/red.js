@@ -1,7 +1,29 @@
 // Conexión directa entre dos navegadores con PeerJS (servidor público gratuito de PeerJS solo para presentarse; después
 // los datos van de navegador a navegador). El anfitrión tiene la partida; el invitado manda acciones y recibe vistas.
 const PREFIJO = "truco-bjr-";
-const ICE = { config: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }] } };
+import { NUBE } from "./nube-config.js";
+const STUN = [{ urls: "stun:stun.l.google.com:19302" }, { urls: "stun:stun1.l.google.com:19302" }];
+const ICE = { config: { iceServers: STUN } };
+
+// Relevo TURN (apertura, tanda 3): la Edge Function `relevo` da credenciales de Cloudflare que vencen en 2 h, para que
+// dos celulares en redes cerradas se conecten igual. Se pide una vez al cargar; si no contesta en 2,5 s o no está
+// activado, se sigue solo con STUN (como antes). Las salas esperan esta promesa antes de crear el Peer.
+const relevo = (async () => {
+  if (!NUBE?.url || !navigator.onLine) return;
+  try {
+    const guardado = JSON.parse(sessionStorage.getItem("truco-relevo") || "null");
+    if (guardado?.vence > Date.now() + 15 * 60_000) { ICE.config.iceServers = [...STUN, ...guardado.iceServers]; return; }
+  } catch {}
+  try {
+    const r = await fetch(`${NUBE.url}/functions/v1/relevo`, { headers: { apikey: NUBE.clave }, signal: AbortSignal.timeout(2500) });
+    const d = await r.json();
+    if (d?.iceServers?.length) {
+      ICE.config.iceServers = [...STUN, ...d.iceServers];
+      try { sessionStorage.setItem("truco-relevo", JSON.stringify(d)); } catch {}
+    }
+  } catch {}
+})();
+export const relevoListo = () => relevo.then(() => ICE.config.iceServers.some((s) => [s.urls].flat().some((u) => /^turns?:/.test(u))));
 
 export const codigoNuevo = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), b => "abcdefghjkmnpqrstuvwxyz23456789"[b % 31]).join("");
 export const linkDe = codigo => `${location.origin}${location.pathname}?sala=${codigo}`;
@@ -27,8 +49,9 @@ export function abrirSala(codigo, { alAbrir, alEntrar, alMensaje, alSalir, alErr
       alError?.(e);
     });
   };
-  crear();
-  return { enviar: m => { if (conn?.open) conn.send(m); }, conectado: () => !!conn?.open, cerrar: () => peer.destroy() };
+  let cerrado = false;
+  relevo.then(() => { if (!cerrado) crear(); });
+  return { enviar: m => { if (conn?.open) conn.send(m); }, conectado: () => !!conn?.open, cerrar: () => { cerrado = true; peer?.destroy(); } };
 }
 
 // invitado: se conecta a la sala y reintenta si se corta
@@ -42,13 +65,16 @@ export function entrarSala(codigo, { alConectar, alMensaje, alCortar, alError, a
     conn.on("close", () => { alCortar?.(); reintentar(); });
   };
   const reintentar = () => { clearTimeout(timer); if (!cerrado) timer = setTimeout(() => (peer.disconnected ? peer.reconnect() : conectar()), 3000); };
-  peer = new Peer(ICE);
-  peer.on("open", conectar);
-  peer.on("disconnected", () => { try { peer.reconnect(); } catch {} });
-  peer.on("error", e => { alError?.(e); if (e.type === "peer-unavailable" || e.type === "network" || e.type === "server-error") reintentar(); });
-  peer.on("call", c => alLlamada?.(c)); // audio del micrófono del pie, reenviado por el anfitrión
-  return { enviar: m => { if (conn?.open) conn.send(m); }, cerrar: () => { cerrado = true; peer.destroy(); },
-    llamar: (stream, metadata) => peer.call(PREFIJO + codigo, stream, { metadata }) };
+  relevo.then(() => {
+    if (cerrado) return;
+    peer = new Peer(ICE);
+    peer.on("open", conectar);
+    peer.on("disconnected", () => { try { peer.reconnect(); } catch {} });
+    peer.on("error", e => { alError?.(e); if (e.type === "peer-unavailable" || e.type === "network" || e.type === "server-error") reintentar(); });
+    peer.on("call", c => alLlamada?.(c)); // audio del micrófono del pie, reenviado por el anfitrión
+  });
+  return { enviar: m => { if (conn?.open) conn.send(m); }, cerrar: () => { cerrado = true; peer?.destroy(); },
+    llamar: (stream, metadata) => peer?.call(PREFIJO + codigo, stream, { metadata }) };
 }
 
 // ---------- mesa de 4 o 6: el anfitrión recibe a varios invitados ----------
@@ -86,15 +112,16 @@ export function abrirSalaGrupo(codigo, maximo, { alAbrir, alEntrar, alMensaje, a
     });
     peer.on("call", c => alLlamada?.(String(c.metadata?.id || ""), c));
   };
-  crear();
+  let cerrado = false;
+  relevo.then(() => { if (!cerrado) crear(); });
   const conDe = id => [...conns].find(([c, i]) => i === id && c.open)?.[0];
   return {
     enviar: (id, m) => { const c = conDe(id); if (c) c.send(m); },
     enviarTodos: m => { for (const [c, i] of conns) if (i && c.open) c.send(m); },
     conectados: () => [...new Set([...conns].filter(([c, i]) => i && c.open).map(([, i]) => i))],
-    llamarA: (id, stream) => { const c = conDe(id); return c ? peer.call(c.peer, stream, { metadata: { de: "anfitrion" } }) : null; },
+    llamarA: (id, stream) => { const c = conDe(id); return c && peer ? peer.call(c.peer, stream, { metadata: { de: "anfitrion" } }) : null; },
     echar: id => { const c = conDe(id); if (c) { c.send({ t: "lleno" }); setTimeout(() => c.close(), 300); } },
-    cerrar: () => peer.destroy(),
+    cerrar: () => { cerrado = true; peer?.destroy(); },
   };
 }
 export const linkMesa = codigo => `${location.origin}${location.pathname}?mesa=${codigo}`;

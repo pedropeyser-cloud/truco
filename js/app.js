@@ -83,7 +83,9 @@ function iniciar() {
   $("#btn-tutorial").onclick = () => Tutorial.abrir({ practicar: () => {
     for (const [a, v] of [["jug", "2"], ["nivel", "facil"]]) document.querySelector(`[data-${a}="${v}"]`)?.click();
     empezarPractica();
-  } });
+  }, terminado: () => Perfil.gloriaMaquina("tutorial") });
+  // esperando a alguien y te equivocaste: cierra la mesa y vuelve a la pantalla de elegir
+  $("#btn-volver-espera").onclick = () => { try { red?.cerrar(); } catch {} try { localStorage.removeItem("truco-sala"); } catch {} location.href = location.pathname; };
   $("#btn-copiar").onclick = copiarLink;
   $("#btn-compartir").onclick = compartirLink;
   addEventListener("resize", () => vista && render([], true));
@@ -197,6 +199,7 @@ function difundir(eventos) {
   recibir(M.vista(estado, 0), eventos);
   if (modo === "anfitrion") red?.enviar({ t: "vista", vista: M.vista(estado, 1), eventos });
   if (modo === "practica") programarBot();
+  if (modo === "practica" && eventos.some(e => e.t === "fin_partida") && estado.ganador === 0) Perfil.gloriaMaquina("victoria");   // 1 de gloria (supabase/maquina.sql)
   if (modo === "anfitrion" && eventos.some(e => e.t === "fin_partida")) anotarPartida();
 }
 /** Terminó la partida: el anfitrión la propone y el invitado la confirma desde su navegador. */

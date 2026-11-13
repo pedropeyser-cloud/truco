@@ -224,6 +224,8 @@ function difundir(eventos) {
   if (eventos.some((e) => e.t === "reparto")) planificarSenasBots();
   programarBots();
   if (modo === "anfitrion" && eventos.some((e) => e.t === "fin_partida")) anotarMesa();
+  const yo = asientos.findIndex((a) => a.tipo === "yo");
+  if (modo === "practica" && eventos.some((e) => e.t === "fin_partida") && estado.ganador === E.equipoDe(yo)) Perfil.gloriaMaquina("victoria");   // contra bots: 1 de gloria
 }
 
 /** Terminó la partida: la propone el anfitrión; cada invitado con perfil la confirma desde su navegador. */
@@ -332,16 +334,11 @@ function ordenarElPieBot() {
     const x = estado.turno;
     if (x === j || E.equipoDe(x) !== E.equipoDe(j) || !humanosDe(j).includes(x)) return;
     if (!(senasMano[x] || []).some((g) => g.tipo === "sena")) return;   // sin sus señas no ordena: no sabe qué tiene
-    const cartas = (senasMano[x] || []).filter((g) => g.tipo === "sena" && g.k !== "nada" && g.k !== "flor").map((g) => BotE.FUERZA_SENA[g.k] || 0);
-    const suya = Math.max(0, ...cartas);
+    const senas = (senasMano[x] || []).filter((g) => g.tipo === "sena" && g.k !== "nada" && g.k !== "flor").map((g) => g.k);
+    const jugadas = estado.bazas.map((bz) => bz.cartas[x]).filter(Boolean).map(K.senaDeCarta).filter(Boolean);
     const rivales = b.cartas.map((c, i) => (c && E.equipoDe(i) !== E.equipoDe(j) ? jerarquia(c) : null)).filter((f) => f !== null);
-    const mejorRival = rivales.length ? Math.max(...rivales) : null;
-    const mia = Math.max(0, ...estado.enMano[j].map(jerarquia));
-    let k = null;
-    if (mejorRival !== null) {
-      if (suya > mejorRival && suya >= 10) k = "p_mata";
-      else if (mia > mejorRival && suya < mejorRival) k = "p_pasa";
-    } else if (b.cartas.every((c) => c === null) && suya >= 12) k = `p_vamos_${x}`;
+    if (!rivales.length && b.cartas.some(Boolean)) return;   // ya tiró un compañero: «¡vamos a…!» es solo para abrir
+    const k = BotE.ordenDelPie({ senas, jugadas, rivales, mias: estado.enMano[j].map(jerarquia), compa: x });
     if (!k) return;
     ordenesDadas.add(clave + ":" + j);
     const mano = estado.numeroMano;

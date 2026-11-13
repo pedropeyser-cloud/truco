@@ -9,6 +9,7 @@ import * as C from "./catalogo.js";
 import * as K from "./caras.js";
 import { dorso } from "./cartas.js";
 import * as S from "./sonido.js";
+import * as Tutorial from "./tutorial.js";
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -44,7 +45,7 @@ export async function iniciar(g) {
   // con link de invitación se queda en Jugar; si no, vuelve a la última pestaña
   const conLink = new URLSearchParams(location.search).has("sala") || new URLSearchParams(location.search).has("mesa");
   irA(conLink ? "jugar" : leer("truco-pestana", "jugar"), true);
-  N.on("sesion", () => { pintarTodo(); ponerNombre(); });
+  N.on("sesion", () => { pintarTodo(); ponerNombre(); gloriaDelTutorial(); });
   N.on("conectados", (l) => { pintarConectados(l); if (vistaActual === "liga") pintarLiga(); });
   N.on("invitacion", mostrarInvitacion);
   N.on("busqueda", ({ error }) => ganchos.aviso?.(error));
@@ -53,6 +54,23 @@ export async function iniciar(g) {
 }
 
 export const perfilId = () => N.miPerfil()?.id || null;
+
+/** Gloria contra la máquina: «tutorial» (3, una vez por cuenta) o «victoria» (1). Avisa lo que sumó. */
+export async function gloriaMaquina(motivo) {
+  if (!perfilId()) return 0;
+  try {
+    const g = await N.gloriaContraMaquina(motivo);
+    if (g > 0) ganchos.aviso?.(motivo === "tutorial" ? `+${g} de gloria por aprender a jugar` : `+${g} de gloria por ganarle a la máquina`, 4000);
+    return g;
+  } catch (e) { console.warn(e); return 0; }
+}
+/** El tutorial pudo terminarse antes de entrar con la cuenta: al entrar se cobra (la base lo da una sola vez). */
+let tutorialCobrado = false;
+function gloriaDelTutorial() {
+  if (tutorialCobrado || !perfilId() || !Tutorial.hecho()) return;
+  tutorialCobrado = true;
+  gloriaMaquina("tutorial");
+}
 export const usuario = () => N.miPerfil()?.usuario || null;
 export const miPerfil = () => N.miPerfil();
 export const perfilesDe = (ids) => N.activa() ? N.perfilesDe(ids.filter(Boolean), true).catch(() => ({})) : Promise.resolve({});
@@ -91,6 +109,8 @@ export function nombreHTML(p, { titulo = true, clase = "" } = {}) {
 }
 
 const partidasPara = (n) => { const k = Math.ceil(n / 3); return k === 1 ? "con una partida ganada llegás" : `unas ${k} partidas ganadas`; };
+/** Cómo se junta la gloria (se repite en la pulpería abierta y cerrada). */
+const COMO_GLORIA = "Cómo se junta: con alguien que también entró con su cuenta, ganar da 3; perder por menos de 5, 1; con el mate y tomando uno, +1. Contra la máquina, cada partida ganada da 1, y terminar «Aprender a jugar» da 3 una vez.";
 const SOL = (px = 16) => `<svg class="sol-i" viewBox="-50 -50 100 100" width="${px}" height="${px}" aria-hidden="true"><circle r="20" fill="none" stroke="currentColor" stroke-width="10"/><circle r="5" fill="currentColor"/>${Array.from({ length: 8 }, (_, k) => { const a = k * Math.PI / 4; return `<line x1="${32 * Math.cos(a)}" y1="${32 * Math.sin(a)}" x2="${45 * Math.cos(a)}" y2="${45 * Math.sin(a)}" stroke="currentColor" stroke-width="9" stroke-linecap="round"/>`; }).join("")}</svg>`;
 const CANDADO = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2" fill="currentColor"/><path d="M8 10V7a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>`;
 
@@ -337,7 +357,7 @@ function pintarPulperia() {
       <span class="barra-g"><i style="width:${pct}%"></i></span><small class="tienes">${tienes} de ${C.CATALOGO.length} en tu poder</small></div>
     <div class="filtros" role="group" aria-label="Qué mostrar">${Object.entries(C.CATS).map(([k, t]) => `<button type="button" data-filtro="${k}" aria-pressed="${k === filtroTienda}">${t}${n(k) ? `<i>${n(k)}</i>` : ""}</button>`).join("")}</div>
     <ul class="estante">${prods}</ul>
-    <p class="como">${SOL(14)} Cómo se junta: ganar una partida da 3; perder por menos de 5, 1; con el mate y tomando uno, +1. Cuenta en partidas con alguien que también entró con su cuenta.</p>`;
+    <p class="como">${SOL(14)} ${COMO_GLORIA}</p>`;
 }
 /** Antes de la primera gloria la pulpería está cerrada: se ve qué hay y cuánto falta, y solo se puede elegir la cara (regalo de la casa). */
 function pintarPulperiaCerrada(el, p, puntos, hechos) {
@@ -352,10 +372,10 @@ function pintarPulperiaCerrada(el, p, puntos, hechos) {
     ${!p ? tarjetaEntrar(N.miUsuario() ? "Elegí tu usuario en Jugar para empezar a juntar gloria." : "Entrá con tu cuenta para juntar gloria jugando con amigos y canjearla acá.") : ""}
     <div class="liga-cerrada"><span class="sol-cerrado">${SOL(96)}</span><span class="candado-g">${CANDADO}</span>
       <h3>Abre con ${PUL_MIN} de gloria</h3>
-      <p>${p ? `Tenés ${puntos}. Te faltan <b>${falta}</b>: ${partidasPara(falta)}.` : `Se abre con tu primera partida ganada.`} Cuentan las partidas con alguien que también entró con su cuenta; contra la máquina no.</p>
+      <p>${p ? `Tenés ${puntos}. Te faltan <b>${falta}</b>: ${partidasPara(falta)}.` : `Se abre con tu primera partida ganada o al terminar «Aprender a jugar».`} Terminar «Aprender a jugar» da 3 de gloria (una vez) y cada partida que le ganás a la máquina, 1.</p>
       <span class="barra-g"><i style="width:${Math.round((puntos / PUL_MIN) * 100)}%"></i></span></div>
     <section><h3 class="tit-sec">Lo que te espera</h3><ul class="estante">${muestra}</ul></section>
-    <p class="como">${SOL(14)} Cómo se junta: ganar una partida da 3; perder por menos de 5, 1; con el mate y tomando uno, +1.</p>`;
+    <p class="como">${SOL(14)} ${COMO_GLORIA}</p>`;
 }
 function clicPulperia(e) {
   const f = e.target.closest("[data-filtro]");
@@ -488,8 +508,9 @@ function leerForm(f, x) {
 }
 async function guardarForm(f, x) {
   const r = leerForm(f, x);
-  if (x.k === "libre") await guardar({}, r.titulo || null, x.k);
-  else await guardar({ color: r.estilo.color || null, fuente: r.estilo.fuente || null }, undefined, x.k);
+  const ok = x.k === "libre" ? await guardar({}, r.titulo || null, null)
+    : await guardar({ color: r.estilo.color || null, fuente: r.estilo.fuente || null }, undefined, null);
+  if (ok) { cerrar(); ganchos.aviso?.("Guardado. Así te ven ahora.", 3000); pintarVista(); }   // antes se reabría la misma hoja y parecía que no guardaba
 }
 
 /** Guarda la pinta: cambios en estilo (null borra la clave) y, si viene, el título. Después reabre la ficha. */
@@ -501,7 +522,8 @@ async function guardar(cambios, titulo, fichaK) {
     await N.guardarCosmeticos({ titulo: titulo === undefined ? p.titulo : titulo, estilo: e });
     S.chasquido?.(0, 0.18);
     if (fichaK && $("#capa").dataset.tipo === "ficha") abrirFicha(fichaK);
-  } catch (x) { ganchos.aviso?.(x.message, 5000); }
+    return true;
+  } catch (x) { ganchos.aviso?.(x.message, 5000); return false; }
 }
 /** Ponerse o sacarse un producto de «poner». */
 function ponerCambios(x, si) {
@@ -579,7 +601,7 @@ async function pintarPartidas() {
     ${caa ? `<section><h3 class="tit-sec">Cara a cara</h3><ul class="caa">${caa}</ul></section>` : ""}
     <section><h3 class="tit-sec">Historial</h3>
     <div class="filtros chicos" role="group" aria-label="Filtrar partidas">${[["todas", "Todas"], ["mano", "Mano a mano"], ["equipo", "En equipo"], ["liga", "Liga"]].map(([k, t]) => `<button type="button" data-fp="${k}" aria-pressed="${k === filtroPartidas}">${t}</button>`).join("")}</div>
-    ${tickets ? `<ul class="tickets">${tickets}</ul>` : `<div class="vacio-g"><span class="vacio-cartas" aria-hidden="true">${dorso()}${dorso()}</span><p>${partidas.length ? "No hay partidas de este tipo." : "Todavía ninguna partida anotada. Se anotan las que jugás con alguien que también entró con su cuenta (contra la máquina no cuentan)."}</p>${partidas.length ? "" : `<button class="b fuerte" data-ir="jugar">Armar una mesa</button>`}</div>`}</section>`;
+    ${tickets ? `<ul class="tickets">${tickets}</ul>` : `<div class="vacio-g"><span class="vacio-cartas" aria-hidden="true">${dorso()}${dorso()}</span><p>${partidas.length ? "No hay partidas de este tipo." : "Todavía ninguna partida anotada. Se anotan las que jugás con alguien que también entró con su cuenta (las de la máquina dan gloria pero no se anotan acá)."}</p>${partidas.length ? "" : `<button class="b fuerte" data-ir="jugar">Armar una mesa</button>`}</div>`}</section>`;
 }
 function clicPartidas(e) {
   const f = e.target.closest("[data-fp]"); if (f) { filtroPartidas = f.dataset.fp; return pintarPartidas(); }

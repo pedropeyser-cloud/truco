@@ -13,6 +13,27 @@ const ENVIDOS = ["envido", "real_envido", "falta_envido"];
 const TRUCOS = ["truco", "retruco", "vale_cuatro"];
 export const FUERZA_SENA = { ancho_espada: 14, ancho_basto: 13, siete_espada: 12, siete_oro: 11, tres: 10, dos: 9, falso: 8 };
 
+/**
+ * Qué le ordena el bot pie a su compañero (persona) cuando le toca tirar. Pura, para poder probarla.
+ * senas: claves de las señas de cartas que hizo el compañero; jugadas: claves de seña de las cartas que ya tiró
+ * (se descuentan: no le dice «matala» con una brava que ya no tiene); rivales: jerarquía de las cartas rivales en la
+ * baza; mias: jerarquía de las cartas que le quedan al pie; compa: su asiento (para «¡vamos a…!»).
+ * Devuelve la clave de la pregunta (p_mata, p_pasa, p_vamos_<asiento>) o null.
+ */
+export function ordenDelPie({ senas, jugadas = [], rivales, mias, compa }) {
+  const quedan = [...senas];
+  for (const k of jugadas) { const i = quedan.indexOf(k); if (i >= 0) quedan.splice(i, 1); }
+  const suya = Math.max(0, ...quedan.map((k) => FUERZA_SENA[k] || 0));
+  const mia = Math.max(0, ...mias);
+  if (rivales.length) {
+    const mejorRival = Math.max(...rivales);
+    if (suya > mejorRival && suya >= 10) return "p_mata";
+    if (mia > mejorRival && suya < mejorRival) return "p_pasa";
+    return null;
+  }
+  return suya >= 12 ? `p_vamos_${compa}` : null;
+}
+
 function semillaDe(v) {
   const txt = JSON.stringify([v.yo, v.numeroMano, v.miMano, v.bazas, v.puntos, v.cantoPendiente,
     v.envido && v.envido.cantos, v.acciones.length]);

@@ -12,11 +12,11 @@ const azar = (a) => a[Math.floor(Math.random() * a.length)];
 const mezclar = (a) => a.map((x) => [Math.random(), x]).sort((p, q) => p[0] - q[0]).map((x) => x[1]);
 
 export const hecho = () => { try { return localStorage.getItem(CLAVE) === "hecho"; } catch { return false; } };
-const marcarHecho = () => { try { localStorage.setItem(CLAVE, "hecho"); } catch {} };
+const marcarHecho = () => { try { localStorage.setItem(CLAVE, "hecho"); } catch {} ganchos.terminado?.(); };   // terminado: 3 de gloria (la base los da una vez)
 
 let ganchos = {}, paso = 0, el = null, quiz = null;
 
-/** ganchos: { practicar } (arranca una mano contra el bot en fácil). */
+/** ganchos: { practicar } (arranca una mano contra el bot en fácil), { terminado } (llegó al final). */
 export function abrir(g = {}) {
   ganchos = g; paso = 0; quiz = null;
   el = document.createElement("section");
