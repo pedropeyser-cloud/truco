@@ -3,7 +3,7 @@
 // Para probar sin base: window.__NUBE_FALSA puede reemplazar estas funciones (ver las pruebas en el scratchpad).
 import { NUBE } from "./nube-config.js";
 
-let cli = null, usuario = null, perfil = null, canal = null;
+let cli = null, usuario = null, perfil = null, canal = null, bloqueados = new Set();
 const oyentes = { sesion: [], conectados: [], invitacion: [], busqueda: [] };
 let conectados = [];
 const emitir = (t, x) => oyentes[t].forEach((f) => { try { f(x); } catch (e) { console.error(e); } });
@@ -34,6 +34,8 @@ async function cambioSesion(sesion) {
     const { data } = await cli.from("perfiles").select("*").eq("id", u.id).maybeSingle();
     perfil = data || null;
   }
+  bloqueados = new Set();
+  if (perfil) { const { data: b } = await cli.from("bloqueos").select("contra"); bloqueados = new Set((b || []).map((x) => x.contra)); }
   emitir("sesion", { usuario, perfil });
   if (perfil) conectarPresencia(); else desconectarPresencia();
 }
@@ -57,7 +59,8 @@ export async function crearPerfil(nombre) {
   if (!/^[a-z0-9_.ñ-]{3,16}$/.test(u)) throw new Error("De 3 a 16 letras o números, sin espacios.");
   if (window.__NUBE_FALSA) { perfil = await window.__NUBE_FALSA.crearPerfil(u); emitir("sesion", { usuario, perfil }); return perfil; }
   const { data, error } = await cli.from("perfiles").insert({ id: usuario.id, usuario: u }).select().single();
-  if (error) throw new Error(error.code === "23505" ? "Ese usuario ya existe. Probá otro." : "No se pudo guardar. Probá de nuevo.");
+  if (error) throw new Error(error.code === "23505" ? "Ese usuario ya existe. Probá otro."
+    : /no se puede usar/.test(error.message) ? "Ese usuario no se puede usar en el truco. Elegí otro." : "No se pudo guardar. Probá de nuevo.");
   perfil = data; emitir("sesion", { usuario, perfil }); conectarPresencia();
   return perfil;
 }
@@ -168,7 +171,7 @@ async function equiposCon(ids) {
 export async function crearEquipo(nombre, tamano) {
   if (window.__NUBE_FALSA) return window.__NUBE_FALSA.crearEquipo(nombre, tamano);
   const { data, error } = await cli.from("equipos").insert({ nombre: String(nombre).trim().slice(0, 24), creador: perfil.id, tamano }).select().single();
-  if (error) throw new Error("No se pudo crear el equipo.");
+  if (error) throw new Error(/no se puede usar/.test(error.message) ? "Ese nombre de equipo no se puede usar. Elegí otro." : "No se pudo crear el equipo.");
   await cli.from("equipo_miembros").insert({ equipo: data.id, jugador: perfil.id, acepto: true });
   return data;
 }
@@ -226,7 +229,7 @@ async function conectarPresencia() {
   try { await cli.realtime.setAuth(); } catch {}
   canal = cli.channel("truco-conectados", { config: { private: true } });
   canal.on("postgres_changes", { event: "INSERT", schema: "public", table: "invitaciones", filter: `para=eq.${perfil.id}` }, async ({ new: inv }) => {
-    if (!inv || inv.para !== perfil?.id) return;
+    if (!inv || inv.para !== perfil?.id || bloqueados.has(inv.de)) return;
     const link = String(inv.link || "");
     if (!link.startsWith(location.origin + location.pathname)) return; // solo links a este mismo juego
     const quien = (await perfilesDe([inv.de]))[inv.de];
@@ -245,7 +248,7 @@ async function mirarConectados() {
   const { data } = await cli.from("conectados").select("id, estado, busca, equipo").gt("visto", desde).neq("id", perfil.id).limit(200);
   const filas = data || [];
   const pf = await perfilesDe(filas.map((f) => f.id));
-  conectados = filas.filter((f) => pf[f.id]).map((f) => ({ ...pf[f.id], id: f.id, estado: f.estado, busca: f.busca, equipo: f.equipo }))
+  conectados = filas.filter((f) => pf[f.id] && !bloqueados.has(f.id)).map((f) => ({ ...pf[f.id], id: f.id, estado: f.estado, busca: f.busca, equipo: f.equipo }))
     .sort((a, b) => a.usuario.localeCompare(b.usuario));
   emitir("conectados", conectados);
 }
@@ -308,4 +311,53 @@ export async function invitar(paraId, link, tipo) {
   if (window.__NUBE_FALSA) return window.__NUBE_FALSA.invitar(paraId, link, tipo);
   const { error } = await cli.from("invitaciones").insert({ para: paraId, link: String(link).slice(0, 300), tipo: String(tipo || "").slice(0, 40) });
   if (error) throw new Error("No se pudo mandar la invitación.");
+}
+
+// ---------- apertura al público: bloqueos, denuncias, borrar la cuenta y errores (2026-11-12) ----------
+/** Bloqueados: no aparecen en tus conectados y no te pueden invitar (eso lo controla la base). */
+export async function misBloqueos() {
+  if (!perfil || !bloqueados.size) return [];
+  if (window.__NUBE_FALSA) return window.__NUBE_FALSA.misBloqueos?.() || [];
+  const pf = await perfilesDe([...bloqueados]);
+  return [...bloqueados].map((id) => ({ id, usuario: pf[id]?.usuario || "?" }));
+}
+export const estaBloqueado = (id) => bloqueados.has(id);
+export async function bloquear(id) {
+  if (window.__NUBE_FALSA) { bloqueados.add(id); return; }
+  const { error } = await cli.from("bloqueos").insert({ contra: id });
+  if (error && error.code !== "23505") throw new Error("No se pudo bloquear.");
+  bloqueados.add(id); invitadosFuera(id);
+}
+export async function desbloquear(id) {
+  if (window.__NUBE_FALSA) { bloqueados.delete(id); return; }
+  const { error } = await cli.from("bloqueos").delete().eq("contra", id);
+  if (error) throw new Error("No se pudo desbloquear.");
+  bloqueados.delete(id);
+}
+function invitadosFuera(id) { conectados = conectados.filter((c) => c.id !== id); emitir("conectados", conectados); }
+
+/** Denuncia (motivo: nombre, insultos, trampa u otro). La lee Pedro en el monitoreo. */
+export async function denunciar(id, motivo, detalle = "") {
+  if (window.__NUBE_FALSA) return;
+  const { error } = await cli.from("denuncias").insert({ contra: id, motivo, detalle: String(detalle).slice(0, 300) });
+  if (error) throw new Error(error.code === "23505" ? "Ya lo denunciaste; lo estamos mirando." : /muchas/.test(error.message) ? "Ya mandaste muchas denuncias hoy." : "No se pudo mandar la denuncia.");
+}
+
+/** Borra la cuenta y todo lo suyo (perfil, gloria, equipos que armó, historial propio). No tiene vuelta atrás. */
+export async function borrarMiCuenta() {
+  if (window.__NUBE_FALSA) { perfil = null; emitir("sesion", { usuario: null, perfil: null }); return; }
+  const { error } = await cli.rpc("borrar_mi_cuenta");
+  if (error) throw new Error(/suspendido/.test(error.message) ? "Con el usuario suspendido no se puede borrar la cuenta. Probá cuando termine la suspensión." : "No se pudo borrar la cuenta. Probá de nuevo.");
+  desconectarPresencia();
+  await cli.auth.signOut().catch(() => {});
+  usuario = null; perfil = null; emitir("sesion", { usuario, perfil });
+}
+
+/** Manda un error del juego a la base (anda también sin cuenta). Lo usa vigia.js; nunca tira.
+ *  Devuelve false solo si la nube todavía no arrancó (para que lo reintente); si no hay base, lo descarta. */
+export async function reportarError(e) {
+  if (window.__NUBE_FALSA || !activa()) return true;
+  if (!cli) return false;
+  try { await cli.from("errores").insert(e); } catch {}
+  return true;
 }

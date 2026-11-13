@@ -33,7 +33,10 @@ export async function iniciar(g) {
   $("#cabecera").onclick = (e) => { const b = e.target.closest("[data-ir]"); if (b) irA(b.dataset.ir); if (e.target.closest("[data-google]")) entrar(); };
   // los clics de las pantallas: uno por pantalla, y lo que pintan adentro cambia
   $("#bloque-cuenta").onclick = clicCuenta;
-  $("#bloque-conectados").onclick = (e) => { const inv = e.target.closest("[data-invitar]"); if (inv) invitar(inv.dataset.invitar, inv.dataset.u); };
+  $("#bloque-conectados").onclick = (e) => {
+    const inv = e.target.closest("[data-invitar]"); if (inv) invitar(inv.dataset.invitar, inv.dataset.u);
+    const mas = e.target.closest("[data-mas]"); if (mas) abrirPersona(mas.dataset.mas, mas.dataset.u);
+  };
   $("#vista-pulperia").onclick = clicPulperia;
   $("#vista-liga").onclick = clicLiga;
   $("#vista-partidas").onclick = clicPartidas;
@@ -142,7 +145,9 @@ function pintarCuenta() {
   } else if (!p) {
     el.innerHTML = `<form class="cuenta-alta" data-alta><label class="campo"><span>Elegí tu usuario (así te ven en la mesa)</span>
       <input type="text" name="u" maxlength="16" autocomplete="nickname" placeholder="ej. pedro" required></label>
-      <p class="cuenta-error" data-error></p><button class="b fuerte">Guardar</button>
+      <p class="cuenta-error" data-error></p>
+      <p class="cuenta-legal">Al guardar aceptás los <a href="terminos.html" target="_blank" rel="noopener">términos de uso</a> y la <a href="privacidad.html" target="_blank" rel="noopener">privacidad</a>.</p>
+      <button class="b fuerte">Guardar</button>
       <button type="button" class="b chico" data-salir>Salir</button></form>`;
     el.querySelector("input").value = (u.user_metadata?.full_name || "").split(" ")[0].toLowerCase().slice(0, 16);
     const f = el.querySelector("[data-alta]");
@@ -177,7 +182,8 @@ function pintarConectados(lista) {
   const el = $("#bloque-conectados"); if (!el) return;
   if (!N.miPerfil()) { el.innerHTML = ""; return; }
   const filas = lista.length ? lista.map((c) => `<li>${avatar(c, 34)}<span class="u">${nombreHTML(c, { titulo: false })}<small class="est ${c.estado === "libre" ? "libre" : "ocupado"}">${c.estado === "libre" ? (c.busca ? `busca ${esc(c.busca)}` : "libre") : "jugando"}</small></span>
-    <button class="b chico-e" data-invitar="${esc(c.id)}" data-u="${esc(c.usuario)}" ${invitados.has(c.id) || c.estado !== "libre" ? "disabled" : ""}>${invitados.has(c.id) ? "invitado" : "Invitar"}</button></li>`).join("")
+    <button class="b chico-e" data-invitar="${esc(c.id)}" data-u="${esc(c.usuario)}" ${invitados.has(c.id) || c.estado !== "libre" ? "disabled" : ""}>${invitados.has(c.id) ? "invitado" : "Invitar"}</button>
+    <button class="b chico-e mas-persona" data-mas="${esc(c.id)}" data-u="${esc(c.usuario)}" aria-label="Bloquear o denunciar a ${esc(c.usuario)}">⋯</button></li>`).join("")
     : `<li class="vacio">Nadie más conectado ahora. Mandá el link y que entre con su cuenta.</li>`;
   el.innerHTML = `<section class="conectados"><h3 class="tit-sec"><span class="punto si"></span>En la pulpería ahora <small>${lista.length}</small></h3><ul>${filas}</ul></section>`;
 }
@@ -342,6 +348,61 @@ function abrirCapa(tipo, html) {
 }
 function cerrar() { const c = $("#capa"); c.hidden = true; c.innerHTML = ""; c.dataset.tipo = ""; }
 
+// ---------- apertura al público (2026-11-12): bloquear, denunciar y borrar la cuenta ----------
+const MOTIVOS = [["nombre", "Nombre o título ofensivo"], ["insultos", "Insultos o acoso"], ["trampa", "Hizo trampa"], ["otro", "Otra cosa"]];
+function abrirPersona(id, u) {
+  if (!N.miPerfil() || !id || id === perfilId()) return;
+  const bloq = N.estaBloqueado(id);
+  const capa = abrirCapa("persona", `<div class="hoja persona">
+    <h2>${esc(u)}</h2>
+    <p class="f-que">${bloq ? "Lo tenés bloqueado." : "Si te molesta, bloquealo: deja de aparecerte entre los conectados y no te puede invitar. No se entera."}</p>
+    ${bloq ? `<button class="b ancho" data-desbloquear-p>Desbloquear</button>` : `<button class="b ancho" data-bloquear-p>Bloquear a ${esc(u)}</button>`}
+    <form class="denuncia" data-denuncia><h3 class="tit-sec">Denunciar</h3>
+      <div class="motivos" role="radiogroup" aria-label="Motivo">${MOTIVOS.map(([k, t], i) => `<label><input type="radio" name="motivo" value="${k}"${i === 0 ? " checked" : ""}><span>${t}</span></label>`).join("")}</div>
+      <textarea name="detalle" maxlength="300" rows="3" placeholder="Contá qué pasó (si querés)"></textarea>
+      <button class="b fuerte ancho">Mandar la denuncia</button>
+      <p class="f-nota">La lee una persona. Si corresponde, se le cambia el nombre o se lo suspende unos días.</p>
+    </form>
+    <button class="b claro" data-cerrar>Volver</button></div>`);
+  capa.onclick = async (e) => {
+    if (e.target === capa || e.target.closest("[data-cerrar]")) return cerrar();
+    try {
+      if (e.target.closest("[data-bloquear-p]")) { await N.bloquear(id); cerrar(); ganchos.aviso?.(`Bloqueaste a ${u}`); pintarVista(); }
+      if (e.target.closest("[data-desbloquear-p]")) { await N.desbloquear(id); cerrar(); ganchos.aviso?.(`Desbloqueaste a ${u}`); pintarVista(); }
+    } catch (x) { ganchos.aviso?.(x.message); }
+  };
+  const f = capa.querySelector("[data-denuncia]");
+  f.onsubmit = async (e) => {
+    e.preventDefault();
+    const b = f.querySelector("button"); b.disabled = true;
+    try { await N.denunciar(id, f.motivo.value, f.detalle.value); cerrar(); ganchos.aviso?.("Gracias. La denuncia llegó.", 4000); }
+    catch (x) { b.disabled = false; ganchos.aviso?.(x.message, 5000); }
+  };
+}
+
+function abrirBorrado() {
+  const p = N.miPerfil(); if (!p) return;
+  const capa = abrirCapa("borrar", `<div class="hoja borrar-cuenta">
+    <h2>Borrar tu cuenta</h2>
+    <p class="f-que">Se borran tu usuario, tu gloria, tu liga, lo que tenés puesto, los equipos que armaste y tu lugar en el historial. Las partidas quedan en el historial de tus rivales, sin tu nombre. <b>No tiene vuelta atrás.</b></p>
+    <form data-confirmar-borrado><label class="f-nota" for="borrar-u">Para confirmar, escribí tu usuario: <b>${esc(p.usuario)}</b></label>
+      <input id="borrar-u" name="u" autocomplete="off" autocapitalize="off" spellcheck="false" required>
+      <button class="b peligro ancho" disabled>Borrar para siempre</button></form>
+    <button class="b claro" data-cerrar>Mejor no</button></div>`);
+  capa.onclick = (e) => { if (e.target === capa || e.target.closest("[data-cerrar]")) cerrar(); };
+  const f = capa.querySelector("[data-confirmar-borrado]"), b = f.querySelector("button");
+  f.oninput = () => { b.disabled = N.normalizarUsuario(f.u.value) !== p.usuario; };
+  f.onsubmit = async (e) => {
+    e.preventDefault(); if (b.disabled) return;
+    b.disabled = true; b.textContent = "Borrando…";
+    try {
+      await N.borrarMiCuenta();
+      try { localStorage.removeItem(claveCanjes()); localStorage.removeItem("truco-pestana"); } catch {}
+      cerrar(); irA("jugar"); ganchos.aviso?.("Listo: tu cuenta y tus datos se borraron.", 5000);
+    } catch (x) { b.disabled = false; b.textContent = "Borrar para siempre"; ganchos.aviso?.(x.message, 5000); }
+  };
+}
+
 function abrirFicha(k, recien = false) {
   const x = C.producto(k); if (!x) return;
   const p = N.miPerfil(), est = estadoDe(p, x), puntos = p?.puntos || 0;
@@ -477,7 +538,7 @@ async function pintarPartidas() {
     || (filtroPartidas === "equipo" && x.tipo !== "1v1" && !x.clasificatoria) || (filtroPartidas === "liga" && x.clasificatoria);
   const lista = partidas.filter(filtra);
   const tickets = lista.map((x) => {
-    const rivs = x.jugadores.filter((j) => j.lado !== x.lado).map((j) => esc(j.usuario)).join(", ");
+    const rivs = x.jugadores.filter((j) => j.lado !== x.lado).map((j) => `<button type="button" class="persona-n" data-mas="${esc(j.id)}" data-u="${esc(j.usuario)}" title="Bloquear o denunciar">${esc(j.usuario)}</button>`).join(", ");
     const comp = x.jugadores.filter((j) => j.lado === x.lado && j.id !== p.id).map((j) => esc(j.usuario)).join(", ");
     const mio = x.lado === 0 ? x.puntos0 : x.puntos1, suyo = x.lado === 0 ? x.puntos1 : x.puntos0;
     const fecha = new Date(x.jugada).toLocaleDateString("es-AR", { day: "numeric", month: "short" });
@@ -499,6 +560,7 @@ async function pintarPartidas() {
 }
 function clicPartidas(e) {
   const f = e.target.closest("[data-fp]"); if (f) { filtroPartidas = f.dataset.fp; return pintarPartidas(); }
+  const mas = e.target.closest("[data-mas]"); if (mas) return abrirPersona(mas.dataset.mas, mas.dataset.u);
   if (e.target.closest("[data-google]")) return entrar();
   const ir = e.target.closest("[data-ir]"); if (ir) irA(ir.dataset.ir);
 }
@@ -531,9 +593,15 @@ async function pintarVos() {
     <div data-vos-estilo></div>
     <section><h3 class="tit-sec">Lo que tenés puesto <button class="b chico-e" data-ir="pulperia">Pulpería ›</button></h3><div class="slots">${slots}</div></section>
     <section data-vos-equipos><h3 class="tit-sec">Equipos</h3><p class="cargando">…</p></section>
-    <button class="b claro ancho salir" data-salir-cuenta>Salir de la cuenta</button>`;
-  const [partidas, equipos] = await Promise.all([N.misPartidas().catch(() => []), N.misEquipos().catch(() => [])]);
+    <section class="tu-cuenta"><h3 class="tit-sec">Tu cuenta</h3>
+      <div data-bloqueados></div>
+      <button class="b claro ancho salir" data-salir-cuenta>Salir de la cuenta</button>
+      <p class="legales"><a href="terminos.html" target="_blank" rel="noopener">Términos de uso</a> · <a href="privacidad.html" target="_blank" rel="noopener">Privacidad</a> · <button type="button" class="enlace peligro" data-borrar-cuenta>Borrar mi cuenta</button></p>
+    </section>`;
+  const [partidas, equipos, bloq] = await Promise.all([N.misPartidas().catch(() => []), N.misEquipos().catch(() => []), N.misBloqueos().catch(() => [])]);
   if (vistaActual !== "vos") return;
+  const eb = el.querySelector("[data-bloqueados]");
+  if (eb) eb.innerHTML = bloq.length ? `<p class="nota-eq">Bloqueados: no te aparecen ni te pueden invitar.</p><ul class="bloqueados">${bloq.map((b) => `<li><span>${esc(b.usuario)}</span><button class="b chico" data-desbloquear="${esc(b.id)}">Desbloquear</button></li>`).join("")}</ul>` : "";
   partidasCache = partidas;
   const r = N.resumir(partidas);
   let racha = 0; for (const x of partidas) { if (x.gano) racha++; else break; }
@@ -577,6 +645,9 @@ let equiposVos = [];
 async function clicVos(e) {
   const t = e.target;
   if (t.closest("[data-salir-cuenta]")) { await N.salir(); return irA("jugar"); }
+  if (t.closest("[data-borrar-cuenta]")) return abrirBorrado();
+  const desb = t.closest("[data-desbloquear]");
+  if (desb) { try { await N.desbloquear(desb.dataset.desbloquear); ganchos.aviso?.("Desbloqueado"); } catch (x) { ganchos.aviso?.(x.message); } return pintarVos(); }
   const ir = t.closest("[data-ir]"); if (ir) return irA(ir.dataset.ir);
   const fi = t.closest("[data-ficha]"); if (fi) return abrirFicha(fi.dataset.ficha);
   const borrar = t.closest("[data-borrar]"), dejar = t.closest("[data-dejar]"), des = t.closest("[data-desafiar]"), acepta = t.closest("[data-aceptar]");

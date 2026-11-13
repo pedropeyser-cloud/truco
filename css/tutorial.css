@@ -1,0 +1,77 @@
+/* «Aprender a jugar» (docs/crecer.md, tanda 1): misma noche, papel y ámbar; una pantalla con pasos y ejercicios. */
+
+.b-aprender { align-self: center; border: 0; background: none; color: var(--ambar); font-size: 15px; padding: 8px 10px; min-height: 44px; border-radius: 10px; }
+.b-aprender .ba-t { font-family: Caveat, cursive; font-size: 21px; margin-right: 4px; }
+
+.pantalla.tutorial { z-index: 55; display: flex; flex-direction: column; background: var(--noche); }
+.pantalla.tutorial > * { position: relative; }
+.tu-cab { display: flex; align-items: center; gap: 12px; padding: max(10px, env(safe-area-inset-top)) 12px 8px; }
+.tu-progreso { flex: 1; display: flex; gap: 4px; }
+.tu-progreso i { flex: 1; height: 5px; border-radius: 99px; background: #2a2f39; }
+.tu-progreso i.ya { background: var(--ambar-p); }
+.tu-progreso i.ahora { background: var(--ambar); box-shadow: 0 0 10px rgba(240,169,59,.6); }
+.tu-num { font: 12px Plex, monospace; color: var(--gris); }
+.tu-cuerpo { flex: 1; overflow-y: auto; width: 100%; max-width: 520px; margin: 0 auto; padding: 8px 20px 24px; display: flex; flex-direction: column; gap: 14px; }
+.tu-cuerpo h2 { font-size: 30px; font-weight: 800; letter-spacing: -.02em; line-height: 1.05; }
+.tu-cuerpo p { color: var(--texto-suave); line-height: 1.5; font-size: 16px; }
+.tu-cuerpo p b { color: var(--papel); }
+.tu-grande { font-size: 19px !important; color: var(--papel) !important; }
+.tu-nota { font: 12.5px/1.5 Plex, monospace !important; color: var(--gris) !important; }
+.tu-pie { display: flex; justify-content: space-between; gap: 10px; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--linea); background: rgba(12,14,18,.94); }
+.tu-pie .b { min-width: 120px; }
+
+.tu-carta { display: inline-block; flex: none; width: 74px; aspect-ratio: 600 / 860; filter: drop-shadow(0 8px 10px rgba(0,0,0,.5)); }
+.tu-carta svg { display: block; width: 100%; height: 100%; }
+.tu-carta.chica { width: 40px; }
+.tu-carta.luz { filter: drop-shadow(0 0 10px rgba(240,169,59,.85)) drop-shadow(0 8px 10px rgba(0,0,0,.5)); }
+.tu-abanico { display: flex; justify-content: center; padding: 10px 0 4px; }
+.tu-abanico .tu-carta { width: 92px; margin: 0 -10px; }
+.tu-abanico .tu-carta:nth-child(1) { transform: rotate(-9deg) translateY(6px); }
+.tu-abanico .tu-carta:nth-child(3) { transform: rotate(9deg) translateY(6px); }
+.tu-abanico.chico .tu-carta { width: 58px; margin: 0 -6px; }
+.tu-fila { display: flex; justify-content: center; gap: 10px; }
+.tu-fila > div { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.tu-fila small { font: 600 13px Plex, monospace; color: var(--ambar); }
+.tu-lista { padding-left: 22px; color: var(--texto-suave); line-height: 1.7; }
+.tu-escalera { list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; counter-reset: e 4; }
+.tu-escalera li { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--texto-suave); counter-increment: e; }
+.tu-escalera li::before { content: counter(e) "."; font: 12px Plex, monospace; color: var(--gris); width: 22px; text-align: right; }
+
+.tu-cuenta { font: 12px Plex, monospace !important; color: var(--ambar) !important; }
+.tu-duelo { display: flex; align-items: center; justify-content: center; gap: 14px; }
+.tu-duelo > span { font-family: Caveat, cursive; font-size: 26px; color: var(--gris); }
+.tu-elegir { border: 3px solid transparent; background: none; padding: 6px; border-radius: 14px; transition: transform .15s; }
+.tu-elegir .tu-carta { width: 112px; }
+.tu-elegir:not(:disabled):active { transform: scale(.96); }
+.tu-elegir.bien, .tu-ops .b.bien, .tu-parda.bien { border-color: var(--ok, #6fbf73); box-shadow: 0 0 18px rgba(111,191,115,.4); }
+.tu-elegir.mal, .tu-ops .b.mal, .tu-parda.mal { border-color: #e0644c; }
+.tu-elegir.apagada { opacity: .5; }
+.tu-ops { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.tu-ops .b { font-size: 22px; font-weight: 700; min-height: 54px; border-width: 2px; }
+.tu-fb { font-size: 16px !important; font-weight: 600; }
+.tu-fb.si { color: #9fdc9f !important; } .tu-fb.no { color: #f0a08c !important; }
+.tu-resultado { text-align: center; padding: 22px 16px; border-radius: 18px; background: radial-gradient(circle at 50% 0%, rgba(240,169,59,.25), transparent 70%), var(--superficie); border: 1px solid var(--linea); }
+.tu-resultado b { display: block; font: 700 54px/1 Caveat, cursive; color: var(--ambar); }
+
+.tu-bazas { display: flex; flex-direction: column; gap: 8px; }
+.tu-bazas > div { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-radius: 12px; background: var(--superficie); border: 1px solid var(--linea); }
+.tu-bazas span { font: 12px Plex, monospace; color: var(--gris); width: 28px; }
+.tu-bazas i { font-family: Caveat, cursive; font-size: 20px; color: var(--gris); font-style: normal; }
+.tu-bazas b { margin-left: auto; font-size: 14px; }
+.tu-bazas b.si { color: #9fdc9f; } .tu-bazas b.no { color: #f0a08c; }
+.tu-cantos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tu-cantos > div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 6px; border-radius: 14px; text-align: center; background: var(--papel); color: var(--tinta); transform: rotate(-1.5deg); }
+.tu-cantos > div:nth-child(2) { transform: rotate(1deg); }
+.tu-cantos b { font: 700 24px/1 Caveat, cursive; color: var(--ambar-p); }
+.tu-cantos span { font-size: 15px; font-weight: 600; }
+.tu-cantos small { font: 11px Plex, monospace; color: #6c6759; }
+.tu-ejemplos { display: flex; flex-direction: column; gap: 10px; }
+.tu-ejemplos > div { display: flex; align-items: center; gap: 12px; padding: 4px 12px 4px 4px; border-radius: 14px; background: var(--superficie); border: 1px solid var(--linea); }
+.tu-ejemplos .tu-abanico { padding: 6px 4px; flex: none; }
+.tu-ejemplos p { font-size: 14.5px; }
+
+@media (prefers-reduced-motion: reduce) { .tu-elegir { transition: none; } }
+
+/* sin internet (sin-red.js, tanda 4): aviso arriba en el inicio; practicar contra la máquina sigue andando */
+html.sin-red #inicio:not([hidden])::after { content: "Sin internet: podés practicar contra la máquina"; position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top)); transform: translateX(-50%);
+  z-index: 30; padding: 6px 14px; border-radius: 99px; background: #c4553e; color: var(--papel); font: 12px Plex, monospace; white-space: nowrap; box-shadow: 0 8px 20px rgba(0,0,0,.5); pointer-events: none; }

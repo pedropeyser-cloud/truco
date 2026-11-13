@@ -1,0 +1,39 @@
+/* Apertura al público (2026-11-12): bloquear, denunciar, borrar la cuenta, términos. Aparte de pulperia.css. */
+:root { --peligro: #c2412d; --peligro-noche: #ff8a73; }
+
+/* ⋯ en cada conectado */
+.conectados .mas-persona { min-width: 40px; padding: 4px 8px; font-size: 18px; line-height: 1; letter-spacing: .05em; color: var(--gris); background: transparent; border-color: transparent; }
+.conectados .mas-persona:hover { color: var(--papel); }
+
+/* nombres de rivales en el historial: se tocan para bloquear o denunciar */
+.persona-n { background: none; border: 0; padding: 0; color: inherit; font: inherit; font-weight: inherit; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+
+/* ficha de una persona */
+.hoja.persona .tit-sec { margin: 22px 0 8px; font-family: Plex; font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: #6c6759; }
+.hoja .motivos { display: grid; gap: 6px; margin-bottom: 10px; }
+.hoja .motivos label { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 12px; border: 1px solid #c9c0ab; border-radius: 10px; cursor: pointer; font-size: 15.5px; }
+.hoja .motivos label:has(input:checked) { border-color: var(--ambar-p); background: rgba(184, 98, 27, .08); }
+.hoja .motivos input { accent-color: var(--ambar-p); width: 18px; height: 18px; color-scheme: light; }
+.hoja textarea, .hoja input { color-scheme: light; }
+.hoja textarea, .hoja input[type="text"], .hoja input:not([type]) { width: 100%; font: inherit; font-size: 16px; color: var(--tinta); background: #f6f1e5; border: 1px solid #c9c0ab; border-radius: 10px; padding: 10px 12px; resize: vertical; }
+.hoja textarea:focus, .hoja input:focus { outline: 2px solid var(--ambar-p); outline-offset: 1px; }
+.hoja .f-nota { font-size: 13.5px; color: #6c6759; margin-top: 8px; }
+
+/* borrar la cuenta */
+.hoja .b.peligro { background: var(--peligro); border-color: var(--peligro); color: #fff; }
+.hoja .b.peligro:disabled { opacity: .45; cursor: not-allowed; }
+.hoja.borrar-cuenta label { display: block; margin: 6px 0 8px; }
+
+/* «Tu cuenta» en Vos */
+.tu-cuenta { margin-top: 8px; }
+.tu-cuenta .bloqueados { list-style: none; padding: 0; margin: 6px 0 12px; }
+.tu-cuenta .bloqueados li { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 44px; border-top: 1px solid var(--linea); }
+.tu-cuenta .bloqueados li:first-child { border-top: 0; }
+.tu-cuenta .legales { margin-top: 14px; text-align: center; font-family: Plex; font-size: 12.5px; color: var(--gris); line-height: 2.2; }
+.tu-cuenta .legales a, .tu-cuenta .enlace { color: var(--texto-suave); text-underline-offset: 3px; }
+.tu-cuenta .enlace { background: none; border: 0; padding: 6px 2px; font: inherit; text-decoration: underline; cursor: pointer; }
+.tu-cuenta .enlace.peligro { color: var(--peligro-noche); }
+
+/* alta del usuario: aviso de términos */
+.cuenta-legal { font-size: 13px; color: var(--gris); margin: 4px 0 8px; line-height: 1.5; }
+.cuenta-legal a { color: var(--texto-suave); text-underline-offset: 3px; }

@@ -13,6 +13,8 @@ import { selectorTanto, liderDicho } from "./tanto.js";
 import * as Perfil from "./perfil.js";
 import * as G from "./gloria.js";
 import * as C from "./catalogo.js";
+import { botonCompartir } from "./compartir.js"; // imagen del resultado (docs/crecer.md, tanda 3)
+import * as Emo from "./emotes.js"; // reacciones en la mesa, por PeerJS (docs/crecer.md, tanda 5)
 
 const $ = (s) => document.querySelector(s);
 const RATIO = 860 / 600;
@@ -109,6 +111,7 @@ function conectarAnfitrion() {
       if (m.t === "accion") hostAplicar(j, m.accion);
       else if (m.t === "gesto") registrarGesto(j, m.tipo, m.k);
       else if (m.t === "voz") registrarVoz(j, !!m.on);
+      else if (m.t === "emote") registrarEmote(j, m.k);
       else if (m.t === "revancha" && estado?.fase === "fin_partida") nuevaPartidaMismaMesa();
       else if (m.t === "probado" && pruebas.has(id)) verificarAsiento(id);
     },
@@ -341,6 +344,21 @@ function textoPregunta(k) {
   return p.vamos === vista?.yo ? "¡Vamos a la tuya!" : `¡Vamos a ${vista?.nombres[p.vamos] || "vos"}!`;
 }
 
+// emotes (tanda 5): el que manda lo ve al toque; el anfitrión valida, pone tope y reenvía a todos
+const topeEmote = Emo.tope();
+function mandarEmote(k) {
+  if (!vista || !topeEmote("yo")) return;
+  mostrarEmote(vista.yo, k);
+  if (modo === "invitado") red.enviar({ t: "emote", k });
+  else registrarEmote(vista.yo, k);
+}
+function registrarEmote(j, k) {
+  if (!Emo.valido(k) || !asientos[j]) return;
+  if (asientos[j].tipo !== "yo") { if (!topeEmote(j)) return; if (!Emo.mudo()) mostrarEmote(j, k); }
+  red?.enviarTodos({ t: "emote", jugador: j, k });
+}
+function mostrarEmote(j, k) { if (vista && Emo.valido(k)) bocadillo(j, Emo.textoDe(k))?.classList.add("emote"); }
+
 function hacerGesto(tipo, k) {
   S.desbloquear();
   mostrarGesto(vista.yo, tipo, k);
@@ -438,6 +456,7 @@ function entrarComoInvitado(sala) {
       else if (m.t === "vista") { abrirJuego(); recibir(m.vista, Array.isArray(m.eventos) ? m.eventos : []); }
       else if (m.t === "gesto" && vista && m.jugador !== vista.yo) mostrarGesto(+m.jugador, String(m.tipo), String(m.k));
       else if (m.t === "voz" && vista) marcarVoz(+m.jugador, !!m.on);
+      else if (m.t === "emote" && vista && +m.jugador !== vista.yo && Emo.valido(m.k) && !Emo.mudo()) mostrarEmote(+m.jugador, m.k);
       else if (m.t === "anotada" && vista) Perfil.confirmar(m.id, m.puntos, vista.puntos, { clasif: enClasif, estilo: misCuentas[vista.yo] || null }).then(() => { misCuentas = {}; });
       // la prueba se ata a ESTA mesa (la del link que abrí) y se contesta una sola vez: no se puede reenviar a otra mesa
       else if (m.t === "prueba" && typeof m.codigo === "string" && !probado) { probado = true; Perfil.probar(`${codigo}:${m.codigo.slice(0, 24)}`).then((ok) => ok && red.enviar({ t: "probado" })); }
@@ -507,6 +526,7 @@ function puntoRed(ok) { const p = $("#eq-red"); if (p) { p.classList.toggle("si"
 // ================= JUEGO =================
 function abrirJuego() {
   if (!$("#mesa-eq").hidden) return;
+  Emo.montar($("#mesa-eq .barra"), $("#eq-tanteador"), mandarEmote);
   // tocar fuera de la bandeja de señas la cierra
   document.addEventListener("pointerdown", (e) => {
     if (!bandeja || e.target.closest("#eq-bandeja, #eq-gestos")) return;
@@ -1055,6 +1075,7 @@ function bocadillo(j, texto, pregunta = false) {
   el.style.top = Math.max(m.top + 4, p.top) + "px";
   $("#eq-bocadillos").appendChild(el);
   setTimeout(() => el.remove(), 2400);
+  return el;
 }
 function anuncio(texto) {
   const m = medidas(), c = centro(m), el = document.createElement("div");
@@ -1117,7 +1138,8 @@ function hojaFinPartida() {
   const v = vista, gane = v.ganador === v.equipo;
   const otra = modo === "invitado" ? '<button class="b" data-revancha>Pedir otra partida</button>' : '<button class="b" data-otra>Otra partida</button>';
   return `<div class="hoja" data-tipo="fin"><h2>${gane ? "¡Ganamos!" : "Ganaron ellos"}</h2><p class="sala">partida a ${v.meta}</p>
-    <div class="marcador">nosotros ${v.puntos[v.equipo]} — ${v.puntos[1 - v.equipo]} ellos</div><div class="servilleta">${servilleta(v, v.meta === 30 ? 16 : 22)}</div>${otra}<button class="b claro" data-cerrar>Ver la mesa</button></div>`;
+    <div class="marcador">nosotros ${v.puntos[v.equipo]} — ${v.puntos[1 - v.equipo]} ellos</div><div class="servilleta">${servilleta(v, v.meta === 30 ? 16 : 22)}</div>
+    ${botonCompartir({ gane, mios: v.nombres.map((n, j) => (E.equipoDe(j) === v.equipo ? (j === v.yo ? "vos" : n) : null)).filter(Boolean), suyos: v.nombres.filter((_, j) => E.equipoDe(j) !== v.equipo), pm: v.puntos[v.equipo], ps: v.puntos[1 - v.equipo], meta: v.meta })}${otra}<button class="b claro" data-cerrar>Ver la mesa</button></div>`;
 }
 function hojaMenu() {
   const link = codigo ? `<button class="b claro" data-copiar>Copiar el link de la mesa</button>` : "";

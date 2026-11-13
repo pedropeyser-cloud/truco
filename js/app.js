@@ -1,5 +1,7 @@
 // Pantalla del truco: inicio, mesa, animaciones (riffle, reparto, dar vuelta, abanico), cantos con voz y tanteador de fósforos.
 // Modos: "anfitrion" (tiene la partida y la comparte por link), "invitado" (manda acciones, recibe vistas), "practica" (contra bot.js).
+import "./vigia.js";
+import "./sin-red.js"; // service worker: practicar sin internet (docs/crecer.md, tanda 4) // primero: junta los errores del juego y los manda a la base (apertura 2026-11-12)
 import { botonPantalla, alternarPantalla } from "./pantalla.js";
 import { selectorTanto, liderDicho } from "./tanto.js";
 import * as M from "./motor.js";
@@ -13,6 +15,10 @@ import * as G from "./gloria.js";     // lo que se desbloquea con la gloria (4C)
 import * as C from "./catalogo.js";  // la pulpería: dorsos, paños, porotos, pinta de la cara
 import * as K from "./caras.js";
 import { azarDe } from "./bot-equipos.js";
+import { botonCompartir } from "./compartir.js"; // imagen del resultado (docs/crecer.md, tanda 3)
+import * as Tutorial from "./tutorial.js"; // aprender a jugar (docs/crecer.md, tanda 1)
+import * as Emo from "./emotes.js"; // reacciones en la mesa, por PeerJS (docs/crecer.md, tanda 5)
+import "./social.js"; // amigos, ranking de la semana y torneo de una noche (docs/crecer.md, tanda 6)
 
 const $ = s => document.querySelector(s);
 const params = new URLSearchParams(location.search);
@@ -72,6 +78,12 @@ function iniciar() {
   $("#btn-mate").innerHTML = G.MATE;
   $("#btn-mate").onclick = () => { Perfil.tomarMate(); const b = $("#btn-mate"); b.classList.add("tomando"); setTimeout(() => b.classList.remove("tomando"), 1300); aviso("Tomaste un mate: +1 de gloria al terminar la partida"); };
   $("#btn-practica").onclick = empezarPractica;
+  // aprender a jugar: termina con una mano contra el Barajador en fácil
+  if (Tutorial.hecho()) $("#btn-tutorial").innerHTML = "Repasar cómo se juega ›";
+  $("#btn-tutorial").onclick = () => Tutorial.abrir({ practicar: () => {
+    for (const [a, v] of [["jug", "2"], ["nivel", "facil"]]) document.querySelector(`[data-${a}="${v}"]`)?.click();
+    empezarPractica();
+  } });
   $("#btn-copiar").onclick = copiarLink;
   $("#btn-compartir").onclick = compartirLink;
   addEventListener("resize", () => vista && render([], true));
@@ -153,6 +165,7 @@ function conectarAnfitrion() {
         });
       } else if (m.t === "accion") hostAplicar(1, m.accion);
       else if (m.t === "revancha" && vista?.fase === "fin_partida") nuevaPartidaMismaMesa();
+      else if (m.t === "emote") recibirEmote(1, m.k);
     }
   });
 }
@@ -228,6 +241,7 @@ function entrarComoInvitado(sala) {
     alConectar: () => { conectadoAlguna = true; red.enviar({ t: "hola", nombre, perfil: Perfil.perfilId() }); $("#txt-invitado").textContent = "Sentándote…"; puntoRed(true); },
     alMensaje: m => {
       if (m.t === "vista") { abrirJuego(); recibir(m.vista, m.eventos || []); }
+      else if (m.t === "emote" && vista) recibirEmote(1 - vista.yo, m.k);
       else if (m.t === "prueba" && typeof m.codigo === "string" && !probado) { probado = true; Perfil.probar(`${codigo}:${m.codigo.slice(0, 24)}`).then(ok => ok && red.enviar({ t: "probado" })); }
       else if (m.t === "perfiles") {
         rivalPerfil = typeof m.ids?.[0] === "string" ? m.ids[0].slice(0, 40) : null; enClasif = m.clasificatoria === true;
@@ -274,7 +288,18 @@ function abrirJuego() {
   $("#btn-tanteador").onclick = () => abrirCapa(hojaTanteador());
   $("#btn-menu").onclick = () => abrirCapa(hojaMenu());
   $("#mesa").addEventListener("click", e => { if (!e.target.closest(".carta") && elegida) { elegida = null; render([], false); } });
+  Emo.montar($("#juego .barra"), $("#btn-tanteador"), mandarEmote);
 }
+// emotes (tanda 5): el que manda lo ve al toque; el anfitrión valida y pone tope a lo que llega
+const topeEmote = Emo.tope();
+function mandarEmote(k) {
+  if (!vista || !topeEmote("yo")) return;
+  mostrarEmote(vista.yo, k);
+  if (modo === "practica") { const r = Emo.respuestaBot(k); if (r) setTimeout(() => vista && mostrarEmote(1 - vista.yo, r), 900 + Math.random() * 700); }
+  else red?.enviar({ t: "emote", k });
+}
+function recibirEmote(j, k) { if (Emo.valido(k) && topeEmote(j) && !Emo.mudo()) mostrarEmote(j, k); }
+function mostrarEmote(j, k) { if (vista && Emo.valido(k)) bocadillo(j, Emo.textoDe(k))?.classList.add("emote"); }
 function enviarAccion(accion) {
   elegida = null; confirmaMazo = false;
   if (modo === "invitado") red.enviar({ t: "accion", accion });
@@ -620,6 +645,7 @@ function bocadillo(jugador, texto) {
   el.style.top = (mio ? m.manoY - m.ch / 2 - 96 : m.rivalY + m.rh / 2 + 6) + "px";
   $("#bocadillos").appendChild(el);
   setTimeout(() => el.remove(), 2400);
+  return el;
 }
 function pulsoLampara() {
   const j = $("#juego"); j.classList.add("luz-alta");
@@ -673,7 +699,8 @@ function hojaFinPartida() {
   const gane = vista.ganador === vista.yo;
   const otra = modo === "invitado" ? '<button class="b" data-revancha>Pedir otra partida</button>' : '<button class="b" data-otra>Otra partida</button>';
   return `<div class="hoja" data-tipo="fin"><h2>${gane ? "¡Ganaste!" : `Ganó ${esc(nombreRival())}`}</h2><p class="sala">partida a ${vista.meta}</p>
-    <div class="marcador">vos ${vista.puntos[vista.yo]} — ${vista.puntos[rv()]} ${esc(nombreRival())}</div><div class="servilleta">${servilleta(vista, vista.meta === 30 ? 16 : 22)}</div>${otra}<button class="b claro" data-cerrar>Ver la mesa</button></div>`;
+    <div class="marcador">vos ${vista.puntos[vista.yo]} — ${vista.puntos[rv()]} ${esc(nombreRival())}</div><div class="servilleta">${servilleta(vista, vista.meta === 30 ? 16 : 22)}</div>
+    ${botonCompartir({ gane, mios: ["vos"], suyos: [nombreRival()], pm: vista.puntos[vista.yo], ps: vista.puntos[rv()], meta: vista.meta })}${otra}<button class="b claro" data-cerrar>Ver la mesa</button></div>`;
 }
 function hojaMenu() {
   const link = codigo ? `<button class="b claro" data-copiar>Copiar el link de la mesa</button>` : "";

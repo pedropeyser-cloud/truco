@@ -1,0 +1,53 @@
+/* Amigos, ranking de la semana y torneo de una noche (js/social.js, docs/crecer.md tanda 6).
+   Las tarjetas heredan section.conectados de pulperia.css; acá solo lo propio. */
+#bloque-amigos:empty, #bloque-torneo:empty { display: none; }
+section.social-amigos, section.social-torneo { margin-top: 12px; }
+section.social-amigos li.pedido { background: rgba(240,169,59,.07); margin: 0 -14px; padding: 6px 14px; }
+section.social-amigos li.pedido .u, section.social-amigos li.espera .u, section.social-amigos li.confirma .u { font-size: 14px; line-height: 1.3; white-space: normal; }
+section.social-amigos li.espera { min-height: 44px; color: var(--gris); }
+section.social-amigos li.espera small { font: 11px Plex, monospace; }
+.sumar-amigo { display: flex; gap: 6px; padding: 10px 0 8px; border-top: 1px solid var(--linea); }
+.sumar-amigo input { flex: 1; min-width: 0; min-height: 40px; padding: 6px 12px; border-radius: 99px; border: 1px solid var(--linea); background: transparent; color: inherit; font: 15px Bricolage, sans-serif; }
+.sumar-amigo input:focus { outline: 2px solid var(--ambar); outline-offset: 1px; }
+#bloque-conectados .mas-amigo { min-width: 36px; padding: 5px 0; font-size: 18px; line-height: 1; }
+
+/* torneo */
+section.social-torneo .tit-sec { margin-bottom: 2px; }
+.t-meta { font: 11.5px/1.5 Plex, monospace; color: var(--gris); margin: 2px 0 8px; }
+.fila-t { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 10px; }
+.fila-t .campo { flex: 1; min-width: 120px; }
+.form-torneo .campo { display: flex; flex-direction: column; gap: 4px; font: 12px Plex, monospace; color: var(--gris); margin-bottom: 6px; }
+.form-torneo input, .form-torneo select { min-height: 42px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--linea); background: var(--noche); color: var(--papel); font: 15px Bricolage, sans-serif; }
+.sillas { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.silla { width: 34px; height: 34px; display: grid; place-items: center; }
+.silla.libre { border: 1.5px dashed var(--linea); border-radius: 50%; width: 30px; height: 30px; margin: 2px; }
+.llave { display: grid; gap: 8px; margin: 10px 0 6px; align-items: center; }
+.llave.r2 { grid-template-columns: 1fr 1fr; }
+.llave.r3 { grid-template-columns: 1fr 1fr 1fr; }
+.ronda { display: flex; flex-direction: column; justify-content: space-around; gap: 8px; height: 100%; min-width: 0; }
+.ronda > small { font: 10.5px Plex, monospace; color: var(--gris); text-transform: uppercase; letter-spacing: .08em; }
+.cruce { border: 1px solid var(--linea); border-radius: 10px; padding: 4px 8px; display: flex; flex-direction: column; font-size: 13.5px; min-width: 0; }
+.cruce > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 2px 0; }
+.cruce > span + span { border-top: 1px dashed var(--linea); }
+.cruce .gano { color: var(--ambar); font-weight: 700; }
+.cruce .afuera { color: var(--gris); text-decoration: line-through; }
+.cruce .vos { font-weight: 700; }
+.cruce > .pase { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; font: 10.5px Plex, monospace; color: var(--gris); border-top: 0; white-space: normal; padding-top: 4px; }
+.cruce .pase button { border: 0; background: none; color: var(--ambar); font: inherit; text-decoration: underline; padding: 0 2px; min-height: 30px; }
+.te-toca { border-top: 1px solid var(--linea); padding-top: 8px; margin-bottom: 8px; }
+.te-toca p { margin: 0 0 6px; }
+.campeon { font: 700 28px Caveat, cursive; color: var(--ambar); margin: 6px 0 10px; }
+.b-link { border: 0; background: none; color: var(--ambar); font: inherit; text-decoration: underline; padding: 0; }
+
+/* Liga: esta semana entre amigos */
+section.social-semana { margin-top: 18px; }
+section.social-semana ol { list-style: none; padding: 0; margin: 0; }
+section.social-semana li { display: flex; align-items: center; gap: 10px; min-height: 50px; border-top: 1px solid var(--linea); padding: 5px 0; }
+section.social-semana li:first-child { border-top: 0; }
+section.social-semana li.yo { background: rgba(240,169,59,.07); margin: 0 -14px; padding: 5px 14px; }
+section.social-semana .pos { width: 18px; font: 600 13px Plex, monospace; color: var(--gris); text-align: right; }
+section.social-semana li:first-child .pos { color: var(--ambar); }
+section.social-semana .u { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+section.social-semana .u small { font: 11px Plex, monospace; color: var(--gris); }
+section.social-semana .glo { font: 700 22px Caveat, cursive; color: var(--ambar); }
+section.social-semana .vacio { padding: 6px 0 10px; }

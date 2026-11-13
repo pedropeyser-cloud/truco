@@ -1,0 +1,12 @@
+/* Emotes en la mesa (js/emotes.js, docs/crecer.md tanda 5) */
+.emotes-bandeja { position: absolute; z-index: 45; right: 12px; top: calc(56px + env(safe-area-inset-top)); width: min(300px, calc(100vw - 32px));
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 10px; border-radius: 14px; background: var(--papel); color: var(--tinta);
+  box-shadow: 0 14px 34px rgba(0,0,0,.55); }
+.emotes-bandeja[hidden] { display: none; }
+.emotes-bandeja button { min-height: 44px; border: 1px solid rgba(20,23,28,.18); border-radius: 10px; background: transparent; color: inherit;
+  font: 700 21px/1.05 Caveat, cursive; padding: 4px 8px; }
+.emotes-bandeja button:active { background: rgba(184,98,27,.14); border-color: var(--ambar-p); }
+.emotes-mudo { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 4px 2px 0; font: 11px Plex, monospace; color: rgba(20,23,28,.7); }
+.emotes-mudo input { accent-color: var(--ambar-p); width: 18px; height: 18px; }
+/* la reacción: bocadillo más chico que un canto, para que no se confunda */
+.bocadillo.emote { font-size: clamp(26px, 7.5vw, 36px); opacity: .95; }
