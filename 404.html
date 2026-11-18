@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><meta name="theme-color" content="#0A0C16"><title>AZAR</title>
+<link rel="canonical" href="https://pedropeyser-cloud.github.io/azar/juegos/truco/">
+<style>html,body{margin:0;height:100%;background:#0A0C16;color:#F1EBDD;font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;text-align:center}a{color:#E9B54A}</style>
+<script>
+// Este juego se mudó a AZAR. Se conserva todo lo que trae el link (?sala=, ?mesa=, #…) y se borra la copia vieja guardada.
+(async () => {
+  try { const rs = await navigator.serviceWorker?.getRegistrations?.(); await Promise.all((rs || []).map((r) => r.unregister())); } catch {}
+  try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch {}
+  const resto = location.pathname.replace(/^\/[^/]+\/?/, "");
+  location.replace("https://pedropeyser-cloud.github.io/azar/juegos/truco/" + resto + location.search + location.hash);
+})();
+</script></head>
+<body><p>Nos mudamos a <a href="https://pedropeyser-cloud.github.io/azar/juegos/truco/">AZAR</a>.</p></body></html>
